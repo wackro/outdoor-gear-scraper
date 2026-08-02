@@ -13,9 +13,14 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "confi
 @dataclass(frozen=True)
 class Brand:
     name: str
-    id: int
+    id: int | None = None          # optional: resolved by name when omitted
+    search: str | None = None      # display name to search Vinted for (defaults to the key)
     threshold: float | None = None
     rrp: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def search_text(self) -> str:
+        return self.search or self.name.replace("_", " ")
 
 
 @dataclass(frozen=True)
@@ -75,12 +80,11 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     brands: list[Brand] = []
     for name, settings in brands_raw.items():
         settings = settings or {}
-        if "id" not in settings:
-            raise ValueError(f"Brand '{name}' is missing a numeric `id`.")
         brands.append(
             Brand(
                 name=name,
-                id=int(settings["id"]),
+                id=int(settings["id"]) if settings.get("id") is not None else None,
+                search=settings.get("search"),
                 threshold=settings.get("threshold"),
                 rrp=settings.get("rrp") or {},
             )

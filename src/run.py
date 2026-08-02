@@ -20,12 +20,13 @@ from .pricing.baseline import (
 from .pricing.deals import detect_deals
 from .site.generator import render_site
 from .storage.db import Database
+from .vinted.brand_resolver import resolve_brand_ids
 from .vinted.client import VintedClient, VintedError
 
 log = logging.getLogger("run")
 
 
-def scrape(config: Config, db: Database, client: VintedClient) -> int:
+def scrape(config: Config, db: Database, client: VintedClient, brand_ids: dict[str, int]) -> int:
     """Scrape every brand+category, storing items and price observations.
 
     Failures are isolated per brand+category so one bad query never aborts the
@@ -33,9 +34,12 @@ def scrape(config: Config, db: Database, client: VintedClient) -> int:
     """
     total = 0
     for brand in config.brands:
+        brand_id = brand_ids.get(brand.name)
+        if brand_id is None:
+            continue  # unresolved brand (already logged by the resolver)
         for category, catalog_id in config.categories.items():
             try:
-                items = client.fetch_items(brand.id, catalog_id)
+                items = client.fetch_items(brand_id, catalog_id)
             except VintedError as exc:
                 log.error("Scrape failed for %s/%s: %s", brand.name, category, exc)
                 continue
@@ -73,7 +77,9 @@ def main() -> int:
 
     with Database() as db:
         client = VintedClient(config)
-        total = scrape(config, db, client)
+        brand_ids = resolve_brand_ids(client, config.brands)
+        log.info("Resolved %d/%d brands to ids.", len(brand_ids), len(config.brands))
+        total = scrape(config, db, client, brand_ids)
 
         if total == 0:
             # Almost certainly blocked or the API changed. Do NOT commit — this

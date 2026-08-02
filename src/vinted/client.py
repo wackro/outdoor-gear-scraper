@@ -18,6 +18,7 @@ import logging
 import os
 import random
 import time
+import unicodedata
 
 from curl_cffi import requests
 
@@ -27,6 +28,16 @@ from .models import VintedItem
 log = logging.getLogger(__name__)
 
 CATALOG_PATH = "/api/v2/catalog/items"
+
+
+def _norm(text: str) -> str:
+    """Fold accents/case/punctuation for tolerant brand-name matching.
+
+    e.g. "Fjällräven" -> "fjallraven", "Arc'teryx" -> "arcteryx".
+    """
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return "".join(c for c in stripped.lower() if c.isalnum())
 
 
 class VintedError(RuntimeError):
@@ -64,15 +75,8 @@ class VintedClient:
 
     # -- fetching ------------------------------------------------------------
 
-    def _get_page(self, brand_id: int, catalog_id: int, page: int) -> list[dict]:
-        params = {
-            "page": page,
-            "per_page": self.config.scrape.per_page,
-            "order": self.config.scrape.order,
-            "catalog_ids": catalog_id,
-            "brand_ids": brand_id,
-            "currency": self.config.currency,
-        }
+    def _request(self, params: dict) -> list[dict]:
+        """Call the catalog endpoint with retries/backoff; return the item list."""
         headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
 
         last_error: Exception | None = None
@@ -110,9 +114,59 @@ class VintedClient:
             if attempt < self.config.scrape.max_retries:
                 time.sleep(2 ** attempt)  # exponential backoff: 2s, 4s, ...
 
-        raise VintedError(
-            f"Failed to fetch brand={brand_id} catalog={catalog_id} page={page}: {last_error}"
+        raise VintedError(f"Request failed (params={params}): {last_error}")
+
+    def _get_page(self, brand_id: int, catalog_id: int, page: int) -> list[dict]:
+        return self._request(
+            {
+                "page": page,
+                "per_page": self.config.scrape.per_page,
+                "order": self.config.scrape.order,
+                "catalog_ids": catalog_id,
+                "brand_ids": brand_id,
+                "currency": self.config.currency,
+            }
         )
+
+    def resolve_brand_id(self, search_text: str) -> int | None:
+        """Resolve a brand name to its Vinted brand id.
+
+        Searches the catalog by text (no brand filter) and picks the brand id
+        whose title best matches `search_text` — an exact (accent/-case-folded)
+        match wins, otherwise the most common close match among the results.
+        Returns None if nothing matches, so callers can fall back to a config id.
+        """
+        raw = self._request(
+            {
+                "page": 1,
+                "per_page": self.config.scrape.per_page,
+                "order": self.config.scrape.order,
+                "search_text": search_text,
+                "currency": self.config.currency,
+            }
+        )
+        target = _norm(search_text)
+        counts: dict[int, int] = {}
+        titles: dict[int, str] = {}
+        for item in raw:
+            bid = item.get("brand_id") or (item.get("brand") or {}).get("id")
+            title = item.get("brand_title") or (item.get("brand") or {}).get("title")
+            if not bid or not title:
+                continue
+            counts[bid] = counts.get(bid, 0) + 1
+            titles[bid] = title
+
+        exact = [bid for bid, t in titles.items() if _norm(t) == target]
+        if exact:
+            return int(exact[0])
+        partial = [
+            (counts[bid], bid)
+            for bid, t in titles.items()
+            if target and (target in _norm(t) or _norm(t) in target)
+        ]
+        if partial:
+            return int(max(partial)[1])
+        return None
 
     def fetch_items(self, brand_id: int, catalog_id: int) -> list[VintedItem]:
         """Fetch newest items for a brand+category across the configured page cap."""

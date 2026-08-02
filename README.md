@@ -70,28 +70,33 @@ Key knobs under `deals`:
 | `window_days` | How far back price history feeds the baseline | `90` |
 | `stale_days` | Items unseen this long are marked sold/inactive | `5` |
 
-### Adding or verifying brands
+### Adding brands
 
-Vinted has no "list all brands" endpoint, so each brand's numeric id is read once
-from the live site:
-
-1. Go to [vinted.co.uk](https://www.vinted.co.uk) and search for the brand (and,
-   ideally, a category).
-2. Look at the URL — it contains `brand_ids[]=NNNN` (the brand id) and
-   `catalog[]=NNNN` (the category id).
-3. Add them to `config.yaml`:
+Just list the brand by name — its Vinted brand id is **resolved automatically**
+at scrape time and cached in `data/brand_ids.json`, so you don't need to hunt for
+numeric ids:
 
 ```yaml
 brands:
-  patagonia:
-    id: 6392
-    threshold: 0.35        # optional per-brand override
-    rrp:                   # optional retail prices, used as a fallback baseline
+  patagonia:                 # resolved by name
+  arcteryx:
+    search: "Arc'teryx"      # only needed if the display name differs from the key
+    threshold: 0.35          # optional per-brand override
+    rrp:                     # optional retail prices, used as a fallback baseline
       mens_outerwear: 250
+  the_north_face:
+    id: 2319                 # optional: pin a known id (skips resolution / used as fallback)
 
 categories:
-  mens_outerwear: 2052
+  mens_outerwear: 2052       # category ids are still read from a Vinted URL (see below)
 ```
+
+If a name can't be resolved, the run logs it and skips that brand (falling back to
+`id` if you provided one). To pin an id yourself, read `brand_ids[]=NNNN` from a
+brand search URL on [vinted.co.uk](https://www.vinted.co.uk).
+
+**Categories** are still configured by id: browse a category on vinted.co.uk and
+copy `catalog[]=NNNN` from the URL into the `categories` map.
 
 ## Running locally
 

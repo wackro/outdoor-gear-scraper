@@ -30,30 +30,27 @@ categories:
   mens_outerwear: 2052
   womens_outerwear: 1067
 
-# Brands to watch: friendly name -> settings.
-#   id:        Vinted brand id (required). Read `brand_ids[]=NNN` from a brand search URL.
+# Brands to watch: friendly name -> settings (all optional).
+#   Brand ids are resolved from the name automatically at scrape time and cached
+#   in data/brand_ids.json, so you normally just list names.
+#   search:    display name to search Vinted for, if it differs from the key
+#              (e.g. accents). Defaults to the key with underscores as spaces.
+#   id:        optional fixed brand id — used as a fallback if resolution fails,
+#              and skips resolution entirely if you'd rather pin it.
 #   threshold: optional per-brand override of deals.threshold.
-#   rrp:       optional map of category -> retail price (GBP), used later as an RRP fallback.
-#
-# NOTE: the ids below are PLACEHOLDERS. Verify each against the live site before first run
-# (see README > "Adding or verifying brands").
+#   rrp:       optional map of category -> retail price (GBP), an RRP fallback baseline.
 brands:
   arcteryx:
-    id: 40088
+    search: "Arc'teryx"
     threshold: 0.35
   patagonia:
-    id: 6392
   rab:
-    id: 250134
   montane:
-    id: 89197
   the_north_face:
-    id: 2319
+    id: 2319          # verified working; also resolvable by name
   fjallraven:
-    id: 45447
+    search: "Fjällräven"
   mammut:
-    id: 71766
   berghaus:
-    id: 34099
   haglofs:
-    id: 249649
+    search: "Haglöfs"
