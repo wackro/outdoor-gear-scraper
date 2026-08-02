@@ -19,14 +19,20 @@ is served from **GitHub Pages**.
 - **Bargain detection** — flags items priced well below the running median for
   their brand + category, with a configurable discount threshold (default 30%)
   and optional per-brand overrides.
-- **Deals website** — a card grid showing photo, brand, price vs. baseline,
-  discount %, size and a link straight to the Vinted listing. Sort and filter by
-  discount, deal score, brand, category or recency, all client-side.
+- **Quality floor** — each item's condition is shown, and anything below a
+  configurable floor (default **Good**) is hidden.
+- **Size filtering** — strict, garment-type-aware allow-lists so only sizes you
+  can actually wear show up (e.g. men's shoes UK 8.5/9, clothes M/L, trousers
+  30/32 waist; women's have their own set).
+- **Men's & Women's sections** — the site opens on Men's by default, with a
+  Women's tab that uses its own size rules.
+- **Deals website** — a card grid showing photo, brand, condition, price vs.
+  baseline, discount %, size and a link to the Vinted listing. Sort and filter by
+  discount, deal score, brand, type or recency, all client-side.
 - **Price-history tracking** — every observed price is recorded, so the baseline
   gets more accurate over time.
 - **Hybrid & RRP-ready** — uses price history by default and falls back to
-  configured retail prices (RRP) where available; the baseline layer is a clean
-  interface, so richer pricing sources can be added later.
+  configured retail prices (RRP) where available.
 
 ## How it works
 
@@ -95,8 +101,36 @@ If a name can't be resolved, the run logs it and skips that brand (falling back 
 `id` if you provided one). To pin an id yourself, read `brand_ids[]=NNNN` from a
 brand search URL on [vinted.co.uk](https://www.vinted.co.uk).
 
-**Categories** are still configured by id: browse a category on vinted.co.uk and
-copy `catalog[]=NNNN` from the URL into the `categories` map.
+### Categories, sizes and quality
+
+**Categories** are configured by name too — each entry has a `gender`
+(`men`/`women`), a garment `type` (`clothes`/`trousers`/`shoes`) and a `search`
+title that's resolved to a Vinted catalog id (from the site's category tree,
+cached in `data/category_ids.json`; the `id` field is a fallback):
+
+```yaml
+categories:
+  - {gender: men,   type: clothes,  search: "Jackets"}
+  - {gender: women, type: shoes,    search: "Shoes"}
+```
+
+**Sizes** are an allow-list per gender + type; anything else is hidden. Matching
+is strict and type-aware (shoes read the UK number, trousers read the waist,
+clothes read the letter/number size):
+
+```yaml
+sizes:
+  men:   {clothes: [M, L],        trousers: [30, 32], shoes: [8.5, 9]}
+  women: {clothes: [XS, S, 6, 8], trousers: [8, 10],  shoes: [5]}
+```
+
+**Quality** hides anything below the floor (New with tags > New without tags >
+Very good > Good > Satisfactory):
+
+```yaml
+quality:
+  floor: Good
+```
 
 ## Running locally
 

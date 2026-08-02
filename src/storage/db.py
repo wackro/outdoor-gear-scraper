@@ -34,7 +34,16 @@ class Database:
 
     def _init_schema(self) -> None:
         self.conn.executescript(SCHEMA_PATH.read_text())
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a DB was first created (CREATE IF NOT
+        EXISTS won't alter an existing table)."""
+        have = {row["name"] for row in self.conn.execute("PRAGMA table_info(items)")}
+        for col, decl in (("gender", "TEXT"), ("garment_type", "TEXT"), ("condition", "TEXT")):
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE items ADD COLUMN {col} {decl}")
 
     def close(self) -> None:
         self.conn.close()
@@ -47,26 +56,30 @@ class Database:
 
     # -- items & observations ------------------------------------------------
 
-    def upsert_item(self, item: VintedItem, *, brand: str, category: str, catalog_id: int) -> None:
+    def upsert_item(
+        self, item: VintedItem, *, brand: str, category: str, catalog_id: int,
+        gender: str, garment_type: str,
+    ) -> None:
         """Insert a new item or refresh an existing one's price/last_seen."""
         now = _utc_now_iso()
         self.conn.execute(
             """
-            INSERT INTO items (id, brand, brand_title, category, catalog_id, title,
-                               price, currency, size, url, image_url,
-                               first_seen, last_seen, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO items (id, brand, brand_title, category, catalog_id, gender,
+                               garment_type, title, price, currency, size, condition,
+                               url, image_url, first_seen, last_seen, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(id) DO UPDATE SET
                 price     = excluded.price,
                 size      = excluded.size,
+                condition = excluded.condition,
                 image_url = excluded.image_url,
                 last_seen = excluded.last_seen,
                 active    = 1
             """,
             (
-                item.id, brand, item.brand_title, category, catalog_id, item.title,
-                item.price, item.currency or "GBP", item.size, item.url, item.image_url,
-                now, now,
+                item.id, brand, item.brand_title, category, catalog_id, gender,
+                garment_type, item.title, item.price, item.currency or "GBP", item.size,
+                item.condition, item.url, item.image_url, now, now,
             ),
         )
 
@@ -144,8 +157,8 @@ class Database:
         """Deals joined with their item details, best discount first."""
         return self.conn.execute(
             """
-            SELECT d.*, i.title, i.brand_title, i.size, i.url, i.image_url,
-                   i.first_seen, i.last_seen
+            SELECT d.*, i.title, i.brand_title, i.gender, i.garment_type, i.size,
+                   i.condition, i.url, i.image_url, i.first_seen, i.last_seen
             FROM deals d
             JOIN items i ON i.id = d.item_id
             WHERE i.active = 1

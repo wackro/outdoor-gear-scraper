@@ -1,44 +1,60 @@
 # Vinted UK outdoor-gear bargain scraper — configuration.
-#
-# Copy this file to config/config.yaml and adjust. The scraper reads
-# config/config.yaml by default (override with the CONFIG_PATH env var).
+# Copy config/config.example.yaml to config/config.yaml and adjust.
 
-# Currency to request and to treat as valid. Items in other currencies are skipped.
 currency: GBP
-
-# Base site. Vinted UK for GBP.
 base_url: https://www.vinted.co.uk
 
 scrape:
-  per_page: 96              # Vinted max is 96
-  order: newest_first       # we only care about fresh listings
-  max_pages_per_query: 3    # politeness cap: pages fetched per brand+category
-  min_delay_sec: 2.5        # random delay between requests (lower bound)
-  max_delay_sec: 5.0        # random delay between requests (upper bound)
-  impersonate: chrome       # curl_cffi browser fingerprint (beats DataDome JA3 checks)
-  max_retries: 3            # per-request retries on transient/anti-bot failures
+  per_page: 96
+  order: newest_first
+  max_pages_per_query: 1    # 96 newest per brand+category per day is plenty
+  min_delay_sec: 2.5
+  max_delay_sec: 5.0
+  impersonate: chrome
+  max_retries: 3
 
 deals:
-  threshold: 0.30           # flag when price <= median * (1 - threshold)  => 30%+ below median
-  min_samples: 8            # need at least this many observations before a bracket can flag deals
-  window_days: 90           # only observations within this window feed the baseline
-  stale_days: 5             # items unseen for this long are marked inactive (likely sold)
+  threshold: 0.30           # flag when price <= median * (1 - threshold)
+  min_samples: 8
+  window_days: 90
+  stale_days: 5
 
-# Categories: friendly name -> Vinted catalog_id.
-# Find the id by browsing a category on vinted.co.uk and reading `catalog[]=NNNN` from the URL.
+# Minimum acceptable condition. Items below this are hidden. One of:
+# "New with tags" > "New without tags" > "Very good" > "Good" > "Satisfactory".
+quality:
+  floor: Good
+
+# Allowed sizes per gender + garment type. Anything outside these is hidden.
+# Matching is strict and type-aware (shoes read the UK number, trousers read the
+# waist, clothes read the letter/number size).
+sizes:
+  men:
+    clothes:  [M, L]
+    trousers: [30, 32]      # waist
+    shoes:    [8.5, 9]      # UK
+  women:
+    clothes:  [XS, S, 6, 8]
+    trousers: [8, 10]       # waist / UK
+    shoes:    [5]           # UK
+
+# Categories to scrape. Each is resolved to a Vinted catalog id by name within
+# its gender department (ids below are fallbacks if resolution ever fails).
+#   gender: men | women     type: clothes | trousers | shoes
 categories:
-  mens_outerwear: 2052
-  womens_outerwear: 1067
+  - {gender: men,   type: clothes,  search: "Jackets",              id: 2052}
+  - {gender: men,   type: clothes,  search: "Tops & t-shirts",      id: 76}
+  - {gender: men,   type: clothes,  search: "Jumpers & sweaters",   id: 79}
+  - {gender: men,   type: trousers, search: "Trousers",             id: 34}
+  - {gender: men,   type: trousers, search: "Jeans",                id: 257}
+  - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
+  - {gender: women, type: clothes,  search: "Jackets",              id: 1649}
+  - {gender: women, type: clothes,  search: "Tops & t-shirts",      id: 1198}
+  - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1199}
+  - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 1200}
+  - {gender: women, type: trousers, search: "Jeans",                id: 1696}
+  - {gender: women, type: shoes,    search: "Shoes",                id: 1256}
 
-# Brands to watch: friendly name -> settings (all optional).
-#   Brand ids are resolved from the name automatically at scrape time and cached
-#   in data/brand_ids.json, so you normally just list names.
-#   search:    display name to search Vinted for, if it differs from the key
-#              (e.g. accents). Defaults to the key with underscores as spaces.
-#   id:        optional fixed brand id — used as a fallback if resolution fails,
-#              and skips resolution entirely if you'd rather pin it.
-#   threshold: optional per-brand override of deals.threshold.
-#   rrp:       optional map of category -> retail price (GBP), an RRP fallback baseline.
+# Brands to watch (resolved by name; see README).
 brands:
   arcteryx:
     search: "Arc'teryx"
@@ -47,7 +63,7 @@ brands:
   rab:
   montane:
   the_north_face:
-    id: 2319          # verified working; also resolvable by name
+    id: 2319
   fjallraven:
     search: "Fjällräven"
   mammut:

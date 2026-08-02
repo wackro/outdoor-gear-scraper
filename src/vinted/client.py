@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import time
 import unicodedata
 
@@ -29,6 +30,11 @@ log = logging.getLogger(__name__)
 
 CATALOG_PATH = "/api/v2/catalog/items"
 BRANDS_PATH = "/api/v2/brands"
+
+# Top-level departments in the homepage catalog tree, used to tag each category
+# node with the gender/section it belongs to.
+DEPARTMENTS = ["Women", "Men", "Kids", "Home", "Electronics", "Entertainment", "Beauty", "Pet care"]
+_TREE_NODE = re.compile(r'"id":(\d+),"title":"([^"]+)","url":"/catalog/')
 
 
 def _norm(text: str) -> str:
@@ -149,6 +155,32 @@ class VintedClient:
                 return int(brand["id"])
         return None
 
+    def fetch_catalog_tree(self) -> list[tuple[int, str, str]]:
+        """Return the catalog tree as (catalog_id, title, department) tuples.
+
+        Vinted has no catalog-tree API, but the homepage server-renders the tree
+        as escaped JSON. We unescape it, then tag each category node with the
+        nearest preceding department node so we know its gender/section.
+        """
+        session = self._ensure_session()
+        html = session.get(self.base_url + "/", timeout=30).text
+        text = html.replace('\\"', '"').replace("\\/", "/").replace("\\u0026", "&")
+
+        dept_offsets: dict[str, int] = {}
+        for name in DEPARTMENTS:
+            m = re.search(r'"title":"' + re.escape(name) + r'","url":"/catalog/', text)
+            if m:
+                dept_offsets[name] = m.start()
+
+        def department_for(offset: int) -> str:
+            cands = [(o, n) for n, o in dept_offsets.items() if o <= offset]
+            return max(cands)[1] if cands else ""
+
+        nodes: list[tuple[int, str, str]] = []
+        for m in _TREE_NODE.finditer(text):
+            nodes.append((int(m.group(1)), m.group(2), department_for(m.start())))
+        return nodes
+
     def fetch_items(self, brand_id: int, catalog_id: int) -> list[VintedItem]:
         """Fetch newest items for a brand+category across the configured page cap."""
         items: list[VintedItem] = []
@@ -165,10 +197,11 @@ class VintedClient:
                 items.append(item)
             if len(raw_items) < self.config.scrape.per_page:
                 break  # last page
-            self._sleep()
+            self.throttle()
         return items
 
-    def _sleep(self) -> None:
+    def throttle(self) -> None:
+        """Sleep a randomised, polite delay (between pages and between queries)."""
         delay = random.uniform(
             self.config.scrape.min_delay_sec, self.config.scrape.max_delay_sec
         )
@@ -184,12 +217,14 @@ def _smoke_test() -> None:
     client = VintedClient(config)
     brand = config.brands[0]
     brand_id = client.resolve_brand_id(brand.search_text) or brand.id
-    category_name, catalog_id = next(iter(config.categories.items()))
-    print(f"Fetching {brand.name} / {category_name} (brand={brand_id}, catalog={catalog_id})")
+    category = config.categories[0]
+    catalog_id = category.id
+    print(f"Fetching {brand.name} / {category.name} (brand={brand_id}, catalog={catalog_id})")
     items = client.fetch_items(brand_id, catalog_id)
     print(f"Got {len(items)} items")
     for item in items[:5]:
-        print(f"  £{item.price:>7.2f}  {item.brand_title:<15} {item.size:<8} {item.title[:40]}")
+        print(f"  £{item.price:>7.2f}  {item.brand_title:<15} {item.size:<8} "
+              f"{item.condition:<12} {item.title[:34]}")
 
 
 if __name__ == "__main__":

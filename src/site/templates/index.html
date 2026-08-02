@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="tabs" role="tablist">
+  <button class="tab is-active" data-gender="men" role="tab">
+    Men's <span class="tab-count">{{ counts.men }}</span>
+  </button>
+  <button class="tab" data-gender="women" role="tab">
+    Women's <span class="tab-count">{{ counts.women }}</span>
+  </button>
+</section>
+
 <section class="controls">
   <div class="control">
     <label for="sort">Sort by</label>
@@ -21,15 +30,15 @@
     </select>
   </div>
   <div class="control">
-    <label for="category">Category</label>
-    <select id="category">
-      <option value="">All categories</option>
-      {% for value, label in category_filters %}
+    <label for="type">Type</label>
+    <select id="type">
+      <option value="">All types</option>
+      {% for value, label in type_filters %}
       <option value="{{ value }}">{{ label }}</option>
       {% endfor %}
     </select>
   </div>
-  <p class="count"><span id="visible-count">{{ deals|length }}</span> deals</p>
+  <p class="count"><span id="visible-count">0</span> deals</p>
 </section>
 
 {% if deals %}
@@ -43,9 +52,9 @@
 <section class="empty">
   <p><strong>No deals yet.</strong></p>
   <p>
-    Deals are judged against each brand's recent price history, which needs a
-    week or two of daily scraping to build up. Check back soon — or add retail
-    prices (RRP) to the config to surface deals sooner.
+    Deals are judged against each brand's recent price history and filtered to
+    your chosen sizes and a minimum condition. The first scrape populates this
+    within a day.
   </p>
 </section>
 {% endif %}

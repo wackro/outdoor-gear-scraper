@@ -29,6 +29,39 @@ body {
 
 main { max-width: 1200px; margin: 0 auto; padding: 0 1.25rem 2.5rem; }
 
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.tab {
+  flex: 1;
+  padding: 0.7rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.tab.is-active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.tab-count {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 0.35em;
+  margin-left: 0.3em;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.tab.is-active .tab-count { background: rgba(255, 255, 255, 0.25); }
+
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -87,7 +120,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 1.25rem 2.5rem; }
 .card-body { padding: 0.75rem 0.85rem 0.95rem; }
 .card-brand { margin: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); font-weight: 600; }
 .card-title { margin: 0.15rem 0 0.4rem; font-size: 0.98rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-meta { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--muted); display: flex; gap: 0.6rem; }
+.card-meta { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--muted); display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.card-meta .condition {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(47, 111, 78, 0.1);
+  border-radius: 999px;
+}
 .card-price { margin: 0; display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 .card-price .price { font-size: 1.15rem; font-weight: 700; }
 .card-price .baseline { font-size: 0.8rem; color: var(--muted); text-decoration: line-through; }

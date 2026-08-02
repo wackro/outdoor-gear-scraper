@@ -8,10 +8,13 @@ CREATE TABLE IF NOT EXISTS items (
     brand_title  TEXT,                       -- raw brand_title from the API
     category     TEXT NOT NULL,              -- normalized category key from config
     catalog_id   INTEGER,
+    gender       TEXT,                       -- 'men' | 'women'
+    garment_type TEXT,                       -- 'clothes' | 'trousers' | 'shoes'
     title        TEXT,
     price        REAL NOT NULL,              -- in the configured currency
     currency     TEXT NOT NULL DEFAULT 'GBP',
     size         TEXT,
+    condition    TEXT,                       -- Vinted status, e.g. "Very good"
     url          TEXT,
     image_url    TEXT,
     first_seen   TEXT NOT NULL,              -- ISO8601 UTC

@@ -1,10 +1,12 @@
 <article class="card"
+         data-gender="{{ deal.gender }}"
          data-brand="{{ deal.brand }}"
-         data-category="{{ deal.category }}"
+         data-type="{{ deal.type }}"
          data-discount="{{ deal.discount_pct }}"
          data-score="{{ deal.deal_score }}"
          data-price="{{ deal.price }}"
-         data-first-seen="{{ deal.first_seen }}">
+         data-first-seen="{{ deal.first_seen }}"
+         hidden>
   <a class="card-link" href="{{ deal.url }}" target="_blank" rel="noopener noreferrer">
     <div class="card-image">
       {% if deal.image_url %}
@@ -18,8 +20,9 @@
       <p class="card-brand">{{ deal.brand_title or deal.brand_label }}</p>
       <h2 class="card-title">{{ deal.title }}</h2>
       <p class="card-meta">
-        <span class="category">{{ deal.category_label }}</span>
+        <span class="type">{{ deal.type_label }}</span>
         {% if deal.size %}<span class="size">Size {{ deal.size }}</span>{% endif %}
+        {% if deal.condition %}<span class="condition">{{ deal.condition }}</span>{% endif %}
       </p>
       <p class="card-price">
         <span class="price">{{ currency_symbol }}{{ '%.2f'|format(deal.price) }}</span>

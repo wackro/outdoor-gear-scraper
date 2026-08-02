@@ -21,12 +21,19 @@ from .pricing.deals import detect_deals
 from .site.generator import render_site
 from .storage.db import Database
 from .vinted.brand_resolver import resolve_brand_ids
+from .vinted.category_resolver import resolve_category_ids
 from .vinted.client import VintedClient, VintedError
 
 log = logging.getLogger("run")
 
 
-def scrape(config: Config, db: Database, client: VintedClient, brand_ids: dict[str, int]) -> int:
+def scrape(
+    config: Config,
+    db: Database,
+    client: VintedClient,
+    brand_ids: dict[str, int],
+    category_ids: dict[str, int],
+) -> int:
     """Scrape every brand+category, storing items and price observations.
 
     Failures are isolated per brand+category so one bad query never aborts the
@@ -37,17 +44,24 @@ def scrape(config: Config, db: Database, client: VintedClient, brand_ids: dict[s
         brand_id = brand_ids.get(brand.name)
         if brand_id is None:
             continue  # unresolved brand (already logged by the resolver)
-        for category, catalog_id in config.categories.items():
+        for category in config.categories:
+            catalog_id = category_ids.get(category.name)
+            if catalog_id is None:
+                continue  # unresolved category (already logged)
             try:
                 items = client.fetch_items(brand_id, catalog_id)
             except VintedError as exc:
-                log.error("Scrape failed for %s/%s: %s", brand.name, category, exc)
+                log.error("Scrape failed for %s/%s: %s", brand.name, category.name, exc)
                 continue
             for item in items:
-                db.upsert_item(item, brand=brand.name, category=category, catalog_id=catalog_id)
-                db.add_observation(item, brand=brand.name, category=category)
+                db.upsert_item(
+                    item, brand=brand.name, category=category.name, catalog_id=catalog_id,
+                    gender=category.gender, garment_type=category.type,
+                )
+                db.add_observation(item, brand=brand.name, category=category.name)
             total += len(items)
-            log.info("%s / %s: %d items", brand.name, category, len(items))
+            log.info("%s / %s: %d items", brand.name, category.name, len(items))
+            client.throttle()  # polite pause between queries
     return total
 
 
@@ -79,7 +93,9 @@ def main() -> int:
         client = VintedClient(config)
         brand_ids = resolve_brand_ids(client, config.brands)
         log.info("Resolved %d/%d brands to ids.", len(brand_ids), len(config.brands))
-        total = scrape(config, db, client, brand_ids)
+        category_ids = resolve_category_ids(client, config.categories)
+        log.info("Resolved %d/%d categories to ids.", len(category_ids), len(config.categories))
+        total = scrape(config, db, client, brand_ids, category_ids)
 
         if total == 0:
             # Almost certainly blocked or the API changed. Do NOT commit — this

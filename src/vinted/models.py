@@ -12,6 +12,7 @@ class VintedItem:
     currency: str
     brand_title: str
     size: str
+    condition: str      # Vinted `status`, e.g. "Very good", "Good", "Satisfactory"
     url: str
     image_url: str
 
@@ -42,6 +43,7 @@ class VintedItem:
             currency=currency,
             brand_title=str(raw.get("brand_title") or "").strip(),
             size=str(raw.get("size_title") or "").strip(),
+            condition=str(raw.get("status") or "").strip(),
             url=url,
             image_url=_extract_photo(raw.get("photo")),
         )

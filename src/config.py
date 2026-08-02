@@ -42,20 +42,38 @@ class DealsConfig:
     stale_days: int = 5
 
 
+GENDERS = ("men", "women")
+GARMENT_TYPES = ("clothes", "trousers", "shoes")
+
+
+@dataclass(frozen=True)
+class Category:
+    name: str          # unique key, e.g. "men_jackets"
+    gender: str        # "men" | "women"
+    type: str          # "clothes" | "trousers" | "shoes"
+    search: str        # category title to resolve in the tree (e.g. "Jackets")
+    id: int | None = None  # optional fixed catalog id (fallback / pin)
+
+
 @dataclass(frozen=True)
 class Config:
     currency: str
     base_url: str
     scrape: ScrapeConfig
     deals: DealsConfig
-    categories: dict[str, int]
+    categories: list[Category]
     brands: list[Brand]
+    sizes: dict[str, dict[str, list[str]]]  # gender -> type -> allowed size tokens
+    quality_floor: str
 
     def threshold_for(self, brand_name: str) -> float:
         for brand in self.brands:
             if brand.name == brand_name and brand.threshold is not None:
                 return brand.threshold
         return self.deals.threshold
+
+    def allowed_sizes(self, gender: str, garment_type: str) -> list[str]:
+        return (self.sizes.get(gender) or {}).get(garment_type) or []
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
@@ -69,9 +87,31 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
 
     raw = yaml.safe_load(resolved.read_text()) or {}
 
-    categories = raw.get("categories") or {}
-    if not categories:
+    categories_raw = raw.get("categories") or []
+    if not categories_raw:
         raise ValueError("Config must define at least one entry under `categories`.")
+
+    categories: list[Category] = []
+    for entry in categories_raw:
+        gender = entry.get("gender")
+        gtype = entry.get("type")
+        search = entry.get("search")
+        if gender not in GENDERS:
+            raise ValueError(f"Category {entry!r} needs gender one of {GENDERS}.")
+        if gtype not in GARMENT_TYPES:
+            raise ValueError(f"Category {entry!r} needs type one of {GARMENT_TYPES}.")
+        if not search:
+            raise ValueError(f"Category {entry!r} needs a `search` title.")
+        name = entry.get("name") or f"{gender}_{search.lower().replace(' ', '_')}"
+        categories.append(
+            Category(
+                name=name,
+                gender=gender,
+                type=gtype,
+                search=search,
+                id=int(entry["id"]) if entry.get("id") is not None else None,
+            )
+        )
 
     brands_raw = raw.get("brands") or {}
     if not brands_raw:
@@ -90,11 +130,22 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
             )
         )
 
+    sizes_raw = raw.get("sizes") or {}
+    sizes = {
+        gender: {
+            gtype: [str(s) for s in (tokens or [])]
+            for gtype, tokens in (sizes_raw.get(gender) or {}).items()
+        }
+        for gender in GENDERS
+    }
+
     return Config(
         currency=raw.get("currency", "GBP"),
         base_url=raw.get("base_url", "https://www.vinted.co.uk").rstrip("/"),
         scrape=ScrapeConfig(**(raw.get("scrape") or {})),
         deals=DealsConfig(**(raw.get("deals") or {})),
-        categories={str(k): int(v) for k, v in categories.items()},
+        categories=categories,
         brands=brands,
+        sizes=sizes,
+        quality_floor=raw.get("quality", {}).get("floor", "Good"),
     )

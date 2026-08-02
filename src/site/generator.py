@@ -14,6 +14,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
 
 CURRENCY_SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$"}
+TYPE_LABELS = {"clothes": "Clothes", "trousers": "Trousers", "shoes": "Shoes"}
 
 
 def _humanize(name: str) -> str:
@@ -31,14 +32,17 @@ def render_site(
     rows = db.deals_for_site()
     deals = []
     for row in rows:
+        gender = row["gender"] or "men"
         deals.append(
             {
                 "title": row["title"] or "Untitled listing",
+                "gender": gender,
+                "type": row["garment_type"] or "clothes",
+                "type_label": TYPE_LABELS.get(row["garment_type"], "Clothes"),
                 "brand": row["brand"],
                 "brand_label": _humanize(row["brand"]),
                 "brand_title": row["brand_title"],
-                "category": row["category"],
-                "category_label": _humanize(row["category"]),
+                "condition": row["condition"] or "",
                 "price": row["price"],
                 "baseline": row["baseline"],
                 "baseline_src": row["baseline_src"],
@@ -52,30 +56,28 @@ def render_site(
         )
 
     brands = sorted({d["brand"] for d in deals})
-    categories = sorted({d["category"] for d in deals})
+    types = [t for t in ("clothes", "trousers", "shoes") if any(d["type"] == t for d in deals)]
+    counts = {g: sum(1 for d in deals if d["gender"] == g) for g in ("men", "women")}
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
-    template = env.get_template("index.html")
-    html = template.render(
+    html = env.get_template("index.html").render(
         deals=deals,
         brand_filters=[(b, _humanize(b)) for b in brands],
-        category_filters=[(c, _humanize(c)) for c in categories],
+        type_filters=[(t, TYPE_LABELS[t]) for t in types],
+        counts=counts,
         currency_symbol=CURRENCY_SYMBOLS.get(currency, currency + " "),
         updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
 
     (output_dir / "index.html").write_text(html, encoding="utf-8")
 
-    # Copy static assets (css/js) alongside the page.
     static_out = output_dir / "static"
     if static_out.exists():
         shutil.rmtree(static_out)
     shutil.copytree(STATIC_DIR, static_out)
-
-    # Disable Jekyll processing so GitHub Pages serves files as-is.
     (output_dir / ".nojekyll").touch()
 
     return output_dir / "index.html"
