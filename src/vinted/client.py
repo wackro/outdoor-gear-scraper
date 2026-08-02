@@ -123,37 +123,40 @@ class VintedClient:
 
         raise VintedError(f"Request failed (params={params}): {last_error}")
 
-    def _get_page(self, brand_id: int, catalog_id: int, page: int) -> list[dict]:
+    def _get_page(self, brand_ids: str, catalog_id: int, page: int) -> list[dict]:
         return self._request(
             {
                 "page": page,
                 "per_page": self.config.scrape.per_page,
                 "order": self.config.scrape.order,
                 "catalog_ids": catalog_id,
-                "brand_ids": brand_id,
+                "brand_ids": brand_ids,  # one or many, comma-separated
                 "currency": self.config.currency,
             }
         )
 
-    def resolve_brand_id(self, search_text: str) -> int | None:
-        """Resolve a brand name to its Vinted brand id via the brand endpoint.
+    def resolve_brand(self, search_text: str) -> tuple[int, str] | None:
+        """Resolve a brand name to its Vinted (id, canonical title).
 
         `GET /api/v2/brands?keyword=<name>` returns the matching brands. We pick
         the one whose title equals the search (accent/case-folded); failing that,
-        the first close match. Returns None if nothing matches, so callers can
-        fall back to a configured id.
+        the first close match. Returns None if nothing matches.
         """
         brands = self._request({"keyword": search_text}, path=BRANDS_PATH, result_key="brands")
         target = _norm(search_text)
 
         for brand in brands:
             if brand.get("id") and _norm(brand.get("title", "")) == target:
-                return int(brand["id"])
+                return int(brand["id"]), str(brand.get("title") or "")
         for brand in brands:
             title = _norm(brand.get("title", ""))
             if brand.get("id") and title and (target in title or title in target):
-                return int(brand["id"])
+                return int(brand["id"]), str(brand.get("title") or "")
         return None
+
+    def resolve_brand_id(self, search_text: str) -> int | None:
+        result = self.resolve_brand(search_text)
+        return result[0] if result else None
 
     def fetch_catalog_tree(self) -> list[tuple[int, str, str]]:
         """Return the catalog tree as (catalog_id, title, department) tuples.
@@ -181,11 +184,17 @@ class VintedClient:
             nodes.append((int(m.group(1)), m.group(2), department_for(m.start())))
         return nodes
 
-    def fetch_items(self, brand_id: int, catalog_id: int) -> list[VintedItem]:
-        """Fetch newest items for a brand+category across the configured page cap."""
+    def fetch_items(self, brand_ids: list[int], catalog_id: int) -> list[VintedItem]:
+        """Fetch newest items for a set of brands within a category.
+
+        Passing all watched brands in one request (Vinted accepts a
+        comma-separated `brand_ids`) keeps the request count to one per category
+        rather than one per brand+category.
+        """
+        brand_ids_param = ",".join(str(b) for b in brand_ids)
         items: list[VintedItem] = []
         for page in range(1, self.config.scrape.max_pages_per_query + 1):
-            raw_items = self._get_page(brand_id, catalog_id, page)
+            raw_items = self._get_page(brand_ids_param, catalog_id, page)
             if not raw_items:
                 break
             for raw in raw_items:
@@ -220,7 +229,7 @@ def _smoke_test() -> None:
     category = config.categories[0]
     catalog_id = category.id
     print(f"Fetching {brand.name} / {category.name} (brand={brand_id}, catalog={catalog_id})")
-    items = client.fetch_items(brand_id, catalog_id)
+    items = client.fetch_items([brand_id], catalog_id)
     print(f"Got {len(items)} items")
     for item in items[:5]:
         print(f"  £{item.price:>7.2f}  {item.brand_title:<15} {item.size:<8} "

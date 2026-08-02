@@ -43,7 +43,7 @@ class DealsConfig:
 
 
 GENDERS = ("men", "women")
-GARMENT_TYPES = ("clothes", "trousers", "shoes")
+GARMENT_TYPES = ("clothes", "trousers", "shoes", "bags")
 
 
 @dataclass(frozen=True)

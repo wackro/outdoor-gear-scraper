@@ -14,7 +14,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
 
 CURRENCY_SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$"}
-TYPE_LABELS = {"clothes": "Clothes", "trousers": "Trousers", "shoes": "Shoes"}
+TYPE_LABELS = {"clothes": "Clothes", "trousers": "Trousers", "shoes": "Shoes", "bags": "Bags"}
+SECTIONS = ("men", "women", "bags")
+SECTION_LABELS = {"men": "Men's", "women": "Women's", "bags": "Bags"}
 
 
 def _humanize(name: str) -> str:
@@ -33,12 +35,15 @@ def render_site(
     deals = []
     for row in rows:
         gender = row["gender"] or "men"
+        gtype = row["garment_type"] or "clothes"
+        section = "bags" if gtype == "bags" else gender
         deals.append(
             {
                 "title": row["title"] or "Untitled listing",
                 "gender": gender,
-                "type": row["garment_type"] or "clothes",
-                "type_label": TYPE_LABELS.get(row["garment_type"], "Clothes"),
+                "section": section,
+                "type": gtype,
+                "type_label": TYPE_LABELS.get(gtype, "Clothes"),
                 "brand": row["brand"],
                 "brand_label": _humanize(row["brand"]),
                 "brand_title": row["brand_title"],
@@ -56,8 +61,8 @@ def render_site(
         )
 
     brands = sorted({d["brand"] for d in deals})
-    types = [t for t in ("clothes", "trousers", "shoes") if any(d["type"] == t for d in deals)]
-    counts = {g: sum(1 for d in deals if d["gender"] == g) for g in ("men", "women")}
+    types = [t for t in ("clothes", "trousers", "shoes", "bags") if any(d["type"] == t for d in deals)]
+    counts = {s: sum(1 for d in deals if d["section"] == s) for s in SECTIONS}
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -67,6 +72,7 @@ def render_site(
         deals=deals,
         brand_filters=[(b, _humanize(b)) for b in brands],
         type_filters=[(t, TYPE_LABELS[t]) for t in types],
+        sections=[(s, SECTION_LABELS[s]) for s in SECTIONS],
         counts=counts,
         currency_symbol=CURRENCY_SYMBOLS.get(currency, currency + " "),
         updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

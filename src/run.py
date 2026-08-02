@@ -20,9 +20,9 @@ from .pricing.baseline import (
 from .pricing.deals import detect_deals
 from .site.generator import render_site
 from .storage.db import Database
-from .vinted.brand_resolver import resolve_brand_ids
+from .vinted.brand_resolver import BrandResolution, resolve_brands
 from .vinted.category_resolver import resolve_category_ids
-from .vinted.client import VintedClient, VintedError
+from .vinted.client import VintedClient, VintedError, _norm
 
 log = logging.getLogger("run")
 
@@ -31,37 +31,43 @@ def scrape(
     config: Config,
     db: Database,
     client: VintedClient,
-    brand_ids: dict[str, int],
+    brands: BrandResolution,
     category_ids: dict[str, int],
 ) -> int:
-    """Scrape every brand+category, storing items and price observations.
+    """Scrape every category once (filtered to all watched brands at once).
 
-    Failures are isolated per brand+category so one bad query never aborts the
-    whole run. Returns the total number of items stored across all queries.
+    One request per category returns the newest items across every brand; each
+    item is mapped back to its brand via `brand_title`. Failures are isolated per
+    category. Returns the total number of items stored.
     """
+    all_brand_ids = list(brands.ids.values())
+    if not all_brand_ids:
+        return 0
+
     total = 0
-    for brand in config.brands:
-        brand_id = brand_ids.get(brand.name)
-        if brand_id is None:
-            continue  # unresolved brand (already logged by the resolver)
-        for category in config.categories:
-            catalog_id = category_ids.get(category.name)
-            if catalog_id is None:
-                continue  # unresolved category (already logged)
-            try:
-                items = client.fetch_items(brand_id, catalog_id)
-            except VintedError as exc:
-                log.error("Scrape failed for %s/%s: %s", brand.name, category.name, exc)
-                continue
-            for item in items:
-                db.upsert_item(
-                    item, brand=brand.name, category=category.name, catalog_id=catalog_id,
-                    gender=category.gender, garment_type=category.type,
-                )
-                db.add_observation(item, brand=brand.name, category=category.name)
-            total += len(items)
-            log.info("%s / %s: %d items", brand.name, category.name, len(items))
-            client.throttle()  # polite pause between queries
+    for category in config.categories:
+        catalog_id = category_ids.get(category.name)
+        if catalog_id is None:
+            continue  # unresolved category (already logged)
+        try:
+            items = client.fetch_items(all_brand_ids, catalog_id)
+        except VintedError as exc:
+            log.error("Scrape failed for %s: %s", category.name, exc)
+            continue
+        stored = 0
+        for item in items:
+            brand_name = brands.name_by_title.get(_norm(item.brand_title))
+            if brand_name is None:
+                continue  # brand not on our watchlist (shouldn't happen given the filter)
+            db.upsert_item(
+                item, brand=brand_name, category=category.name, catalog_id=catalog_id,
+                gender=category.gender, garment_type=category.type,
+            )
+            db.add_observation(item, brand=brand_name, category=category.name)
+            stored += 1
+        total += stored
+        log.info("%s: %d items", category.name, stored)
+        client.throttle()  # polite pause between queries
     return total
 
 
@@ -91,11 +97,11 @@ def main() -> int:
 
     with Database() as db:
         client = VintedClient(config)
-        brand_ids = resolve_brand_ids(client, config.brands)
-        log.info("Resolved %d/%d brands to ids.", len(brand_ids), len(config.brands))
+        brands = resolve_brands(client, config.brands)
+        log.info("Resolved %d/%d brands to ids.", len(brands.ids), len(config.brands))
         category_ids = resolve_category_ids(client, config.categories)
         log.info("Resolved %d/%d categories to ids.", len(category_ids), len(config.categories))
-        total = scrape(config, db, client, brand_ids, category_ids)
+        total = scrape(config, db, client, brands, category_ids)
 
         if total == 0:
             # Almost certainly blocked or the API changed. Do NOT commit — this

@@ -1,12 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="tabs" role="tablist">
-  <button class="tab is-active" data-gender="men" role="tab">
-    Men's <span class="tab-count">{{ counts.men }}</span>
+  {% for value, label in sections %}
+  <button class="tab{% if value == 'men' %} is-active{% endif %}" data-section="{{ value }}" role="tab">
+    {{ label }} <span class="tab-count">{{ counts[value] }}</span>
   </button>
-  <button class="tab" data-gender="women" role="tab">
-    Women's <span class="tab-count">{{ counts.women }}</span>
-  </button>
+  {% endfor %}
 </section>
 
 <section class="controls">

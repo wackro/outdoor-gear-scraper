@@ -7,7 +7,7 @@ base_url: https://www.vinted.co.uk
 scrape:
   per_page: 96
   order: newest_first
-  max_pages_per_query: 1    # 96 newest per brand+category per day is plenty
+  max_pages_per_query: 3    # one query per category (all brands combined), so a few pages is cheap
   min_delay_sec: 2.5
   max_delay_sec: 5.0
   impersonate: chrome
@@ -19,27 +19,23 @@ deals:
   window_days: 90
   stale_days: 5
 
-# Minimum acceptable condition. Items below this are hidden. One of:
-# "New with tags" > "New without tags" > "Very good" > "Good" > "Satisfactory".
 quality:
-  floor: Good
+  floor: Good               # hide anything below this condition
 
-# Allowed sizes per gender + garment type. Anything outside these is hidden.
-# Matching is strict and type-aware (shoes read the UK number, trousers read the
-# waist, clothes read the letter/number size).
+# Allowed sizes per gender + garment type. Bags have no size (unrestricted).
 sizes:
   men:
     clothes:  [M, L]
-    trousers: [30, 32]      # waist
-    shoes:    [8.5, 9]      # UK
+    trousers: [30, 32]
+    shoes:    [8.5, 9]
   women:
     clothes:  [XS, S, 6, 8]
-    trousers: [8, 10]       # waist / UK
-    shoes:    [5]           # UK
+    trousers: [8, 10]
+    shoes:    [5]
 
-# Categories to scrape. Each is resolved to a Vinted catalog id by name within
-# its gender department (ids below are fallbacks if resolution ever fails).
-#   gender: men | women     type: clothes | trousers | shoes
+# Categories to scrape, resolved to catalog ids by name within their gender
+# department. `type: bags` items appear in a unisex "Bags" tab and skip size
+# filtering. (ids are fallbacks if resolution ever fails.)
 categories:
   - {gender: men,   type: clothes,  search: "Jackets",              id: 2052}
   - {gender: men,   type: clothes,  search: "Tops & t-shirts",      id: 76}
@@ -47,26 +43,89 @@ categories:
   - {gender: men,   type: trousers, search: "Trousers",             id: 34}
   - {gender: men,   type: trousers, search: "Jeans",                id: 257}
   - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
-  - {gender: women, type: clothes,  search: "Jackets",              id: 1649}
-  - {gender: women, type: clothes,  search: "Tops & t-shirts",      id: 1198}
-  - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1199}
-  - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 1200}
-  - {gender: women, type: trousers, search: "Jeans",                id: 1696}
-  - {gender: women, type: shoes,    search: "Shoes",                id: 1256}
+  - {gender: men,   type: bags,     search: "Backpacks",            id: 246}
+  - {gender: women, type: clothes,  search: "Jackets",              id: 1908}
+  - {gender: women, type: clothes,  search: "Tops & t-shirts",      id: 12}
+  - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1917}
+  - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 573}
+  - {gender: women, type: trousers, search: "Jeans",                id: 183}
+  - {gender: women, type: shoes,    search: "Shoes",                id: 16}
+  - {gender: women, type: bags,     search: "Backpacks",            id: 157}
 
-# Brands to watch (resolved by name; see README).
+# Brands to watch (resolved by name; add a `search` when the display name differs
+# from the key, e.g. accents). Unresolved brands are logged and skipped.
 brands:
-  arcteryx:
-    search: "Arc'teryx"
-    threshold: 0.35
+  # --- core outdoor ---
+  arcteryx:            {search: "Arc'teryx", threshold: 0.35}
   patagonia:
   rab:
   montane:
-  the_north_face:
-    id: 2319
-  fjallraven:
-    search: "Fjällräven"
+  the_north_face:      {id: 2319}
+  fjallraven:          {search: "Fjällräven"}
   mammut:
   berghaus:
-  haglofs:
-    search: "Haglöfs"
+  haglofs:             {search: "Haglöfs"}
+
+  # --- hiking shoes / boots ---
+  salomon:
+  la_sportiva:         {search: "La Sportiva"}
+  scarpa:
+  lowa:
+  meindl:
+  hanwag:
+  zamberlan:
+  hoka:
+  altra:
+  inov8:               {search: "Inov-8"}
+  topo_athletic:       {search: "Topo Athletic"}
+  merrell:
+  keen:
+  danner:
+  vasque:
+
+  # --- Japanese high-end ---
+  snow_peak:           {search: "Snow Peak"}
+  montbell:            {search: "Montbell"}
+  goldwin:
+  nanga:
+  descente:
+  and_wander:          {search: "and wander"}
+  nanamica:
+  white_mountaineering: {search: "White Mountaineering"}
+  comfy_outdoor_garment: {search: "Comfy Outdoor Garment"}
+  yamatomichi:
+  nonnative:
+  visvim:
+
+  # --- Korean high-end ---
+  kolon_sport:         {search: "Kolon Sport"}
+  black_yak:           {search: "Black Yak"}
+  nepa:
+  k2:
+  eider:
+  discovery_expedition: {search: "Discovery Expedition"}
+
+  # --- other high-end / technical ---
+  norrona:             {search: "Norrøna"}
+  klattermusen:        {search: "Klättermusen"}
+  houdini:
+  sixtysix_north:      {search: "66°North"}
+  peak_performance:    {search: "Peak Performance"}
+  ortovox:
+  salewa:
+  dynafit:
+  mountain_equipment:  {search: "Mountain Equipment"}
+  mountain_hardwear:   {search: "Mountain Hardwear"}
+  outdoor_research:    {search: "Outdoor Research"}
+  veilance:
+  acronym:
+  stone_island:        {search: "Stone Island"}
+  paramo:              {search: "Páramo"}
+
+  # --- bags / packs ---
+  osprey:
+  gregory:
+  deuter:
+  mystery_ranch:       {search: "Mystery Ranch"}
+  lowe_alpine:         {search: "Lowe Alpine"}
+  ortlieb:

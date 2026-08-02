@@ -11,7 +11,7 @@
   var countEl = document.getElementById("visible-count");
   var emptyEl = document.getElementById("empty-state");
 
-  var gender = "men"; // men is the default section
+  var section = "men"; // men is the default section
 
   var num = function (c, a) { return parseFloat(c.getAttribute(a)) || 0; };
   var str = function (c, a) { return c.getAttribute(a) || ""; };
@@ -33,7 +33,7 @@
 
     var visible = 0;
     cards.forEach(function (card) {
-      var show = str(card, "data-gender") === gender &&
+      var show = str(card, "data-section") === section &&
                  (!brand || str(card, "data-brand") === brand) &&
                  (!type || str(card, "data-type") === type);
       card.hidden = !show;
@@ -47,7 +47,7 @@
 
   tabs.forEach(function (tab) {
     tab.addEventListener("click", function () {
-      gender = tab.getAttribute("data-gender");
+      section = tab.getAttribute("data-section");
       tabs.forEach(function (t) { t.classList.toggle("is-active", t === tab); });
       apply();
     });
