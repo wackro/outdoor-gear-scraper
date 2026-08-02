@@ -16,7 +16,19 @@
   var num = function (c, a) { return parseFloat(c.getAttribute(a)) || 0; };
   var str = function (c, a) { return c.getAttribute(a) || ""; };
 
+  // "Hot" = discount weighted by freshness. A deal's heat halves every HALF_LIFE
+  // hours, so a big-but-old bargain sinks below a fresh one of similar size.
+  var HALF_LIFE_HOURS = 24;
+  var now = Date.now();
+  var hot = function (card) {
+    var t = Date.parse(str(card, "data-first-seen"));
+    var ageHours = isNaN(t) ? 0 : Math.max(0, (now - t) / 3600000);
+    var freshness = Math.pow(0.5, ageHours / HALF_LIFE_HOURS);
+    return num(card, "data-discount") * freshness;
+  };
+
   var sorters = {
+    hot: function (a, b) { return hot(b) - hot(a); },
     discount: function (a, b) { return num(b, "data-discount") - num(a, "data-discount"); },
     score: function (a, b) { return num(b, "data-score") - num(a, "data-score"); },
     recent: function (a, b) { return str(b, "data-first-seen").localeCompare(str(a, "data-first-seen")); },
@@ -27,7 +39,7 @@
   function apply() {
     var brand = brandSel.value;
     var type = typeSel.value;
-    var sorter = sorters[sortSel.value] || sorters.discount;
+    var sorter = sorters[sortSel.value] || sorters.hot;
 
     cards.sort(sorter);
 

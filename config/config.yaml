@@ -43,14 +43,14 @@ categories:
   - {gender: men,   type: trousers, search: "Trousers",             id: 34}
   - {gender: men,   type: trousers, search: "Jeans",                id: 257}
   - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
-  - {gender: men,   type: bags,     search: "Backpacks",            id: 246}
+  - {gender: men,   type: bags,     search: "Bags & backpacks",     id: 94}
   - {gender: women, type: clothes,  search: "Jackets",              id: 1908}
   - {gender: women, type: clothes,  search: "Tops & t-shirts",      id: 12}
   - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1917}
   - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 573}
   - {gender: women, type: trousers, search: "Jeans",                id: 183}
   - {gender: women, type: shoes,    search: "Shoes",                id: 16}
-  - {gender: women, type: bags,     search: "Backpacks",            id: 157}
+  - {gender: women, type: bags,     search: "Bags",                 id: 19}
 
 # Brands to watch (resolved by name; add a `search` when the display name differs
 # from the key, e.g. accents). Unresolved brands are logged and skipped.
