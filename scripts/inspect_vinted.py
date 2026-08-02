@@ -1,7 +1,7 @@
-"""Diagnostic v3: locate Vinted's category tree so we can resolve categories by name.
+"""Diagnostic v4: extract garment category IDs (by gender) from the homepage tree.
 
-The JSON catalog-tree API 404s, but the site server-renders the tree into the
-homepage. Find it and show the structure around known nodes.
+The tree is embedded as escaped JSON: \"id\":N,\"title\":\"..\",\"url\":\"/catalog/N-slug\".
+Parse it and print garment nodes bucketed by the nearest preceding gender root.
 """
 import os
 import re
@@ -12,32 +12,36 @@ sys.path.insert(0, os.getcwd())
 from src.config import load_config
 from src.vinted.client import VintedClient
 
-HEADERS = {"Accept": "text/html"}
+GARMENT = re.compile(
+    r"jacket|coat|gilet|body warmer|jumper|sweat|hoodie|fleece|cardigan|"
+    r"trouser|jean|chino|short|shoe|trainer|boot|shirt|\btop\b|dress|skirt",
+    re.I,
+)
+NODE = re.compile(r'\\"id\\":(\d+),\\"title\\":\\"(.*?)\\",\\"url\\":\\"/catalog/')
 
 
 def main() -> None:
     cfg = load_config()
     client = VintedClient(cfg)
     client.bootstrap()
-    sess = client._ensure_session()
+    html = client._ensure_session().get(cfg.base_url + "/", timeout=30).text
 
-    html = sess.get(cfg.base_url + "/", headers=HEADERS, timeout=30).text
-    print("HTML_LEN", len(html))
+    roots = {}
+    for g in ["Women", "Men", "Kids", "Home", "Electronics", "Entertainment", "Beauty", "Pet care"]:
+        m = re.search(r'\\"title\\":\\"' + g + r'\\"', html)
+        roots[g] = m.start() if m else -1
+    print("ROOTS:", {k: v for k, v in roots.items() if v >= 0})
 
-    for kw in ['"catalogs"', '"catalog_tree"', '"code":"coats-and-jackets"',
-               'Coats and jackets', 'Trousers', 'Trainers', 'Shoes', '"id":2052']:
-        print(f"find {kw!r} -> {html.find(kw)}")
-
-    # Show structure around the known men's coats node (id 2052) to reveal siblings.
-    i = html.find('2052')
-    if i >= 0:
-        print("AROUND_2052:", html[max(0, i - 200):i + 400])
-
-    # Pull any {"id":N,...,"title":"...","code":"..."} catalog-like objects.
-    hits = re.findall(r'\{"id":\d+,[^{}]*?"title":"[^"]+","code":"[^"]+"[^{}]*?\}', html)
-    print("CATALOG_OBJ_COUNT:", len(hits))
-    for h in hits[:25]:
-        print("OBJ:", h[:200])
+    nodes = [(int(m.group(1)), m.group(2), m.start()) for m in NODE.finditer(html)]
+    print("TOTAL_NODES:", len(nodes))
+    for nid, title, off in nodes:
+        if not GARMENT.search(title):
+            continue
+        gender = max(
+            ((o, name) for name, o in roots.items() if 0 <= o <= off),
+            default=(-1, "?"),
+        )[1]
+        print(f"{gender:12} {nid:>7}  {title}")
 
 
 if __name__ == "__main__":
