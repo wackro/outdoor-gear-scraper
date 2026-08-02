@@ -64,8 +64,14 @@ def size_matches(garment_type: str, size: str, allowed: list) -> bool:
         return True  # no restriction configured for this type
 
     if garment_type == "trousers":
-        waist = _waist(size)
-        return waist is not None and waist in allowed_set
+        # Explicit waist notation (men's 'W32 L34', '32', '30/32') -> read the
+        # waist only, so the leg length never causes a false match.
+        if re.search(r"W\s?\d", size or "", re.I) or re.match(r"\s*\d{2,3}\s*(/\s*\d{2,3})?\s*$", size or ""):
+            waist = _waist(size)
+            return waist is not None and waist in allowed_set
+        # Otherwise (women's dress-style sizes like 'UK 8', '8 (S)') fall back to
+        # exact token matching.
+        return bool(_tokens(size) & allowed_set)
 
     # shoes + clothes: match any size-like token exactly (e.g. 'UK 9' -> '9',
     # 'XS', 'M', women's numeric '8'). EU sizes like '39' won't match '9'.
