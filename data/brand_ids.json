@@ -1,0 +1,234 @@
+{
+  "acronym": {
+    "id": 712647,
+    "title": "ACRONYM"
+  },
+  "altra": {
+    "id": 395992,
+    "title": "Altra"
+  },
+  "and_wander": {
+    "id": 1512834,
+    "title": "And Wander"
+  },
+  "arcteryx": {
+    "id": 319730,
+    "title": "Arc'teryx"
+  },
+  "berghaus": {
+    "id": 69298,
+    "title": "Berghaus"
+  },
+  "black_yak": {
+    "id": 923810,
+    "title": "Black Yak"
+  },
+  "danner": {
+    "id": 717118,
+    "title": "Danner"
+  },
+  "descente": {
+    "id": 274766,
+    "title": "Descente"
+  },
+  "deuter": {
+    "id": 290481,
+    "title": "Deuter"
+  },
+  "dynafit": {
+    "id": 348408,
+    "title": "Dynafit"
+  },
+  "eider": {
+    "id": 31197,
+    "title": "Eider"
+  },
+  "fjallraven": {
+    "id": 81026,
+    "title": "Fj\u00e4llr\u00e4ven"
+  },
+  "goldwin": {
+    "id": 330213,
+    "title": "Goldwin"
+  },
+  "gregory": {
+    "id": 377123,
+    "title": "Gregory"
+  },
+  "haglofs": {
+    "id": 245240,
+    "title": "Hagl\u00f6fs"
+  },
+  "hanwag": {
+    "id": 181768,
+    "title": "Hanwag"
+  },
+  "hoka": {
+    "id": 5827029,
+    "title": "Hoka"
+  },
+  "houdini": {
+    "id": 379143,
+    "title": "Houdini"
+  },
+  "inov8": {
+    "id": 314926,
+    "title": "Inov-8"
+  },
+  "k2": {
+    "id": 111038,
+    "title": "K2"
+  },
+  "keen": {
+    "id": 266259,
+    "title": "keen"
+  },
+  "klattermusen": {
+    "id": 1638071,
+    "title": "Kl\u00e4ttermusen"
+  },
+  "la_sportiva": {
+    "id": 201320,
+    "title": "La Sportiva"
+  },
+  "lowa": {
+    "id": 233698,
+    "title": "Lowa"
+  },
+  "lowe_alpine": {
+    "id": 254204,
+    "title": "Lowe Alpine"
+  },
+  "mammut": {
+    "id": 209084,
+    "title": "Mammut"
+  },
+  "meindl": {
+    "id": 283168,
+    "title": "Meindl"
+  },
+  "merrell": {
+    "id": 98860,
+    "title": "Merrell"
+  },
+  "montane": {
+    "id": 76778,
+    "title": "Montane"
+  },
+  "montbell": {
+    "id": 615130,
+    "title": "Montbell"
+  },
+  "mountain_equipment": {
+    "id": 572046,
+    "title": "Mountain Equipment"
+  },
+  "mountain_hardwear": {
+    "id": 274165,
+    "title": "Mountain Hardwear"
+  },
+  "mystery_ranch": {
+    "id": 1935083,
+    "title": "Mystery Ranch"
+  },
+  "nanamica": {
+    "id": 596562,
+    "title": "Nanamica"
+  },
+  "nanga": {
+    "id": 434286,
+    "title": "Nanga"
+  },
+  "nepa": {
+    "id": 93904,
+    "title": "Nepalaya"
+  },
+  "norrona": {
+    "id": 356632,
+    "title": "Norr\u00f8na"
+  },
+  "ortlieb": {
+    "id": 351947,
+    "title": "Ortlieb"
+  },
+  "ortovox": {
+    "id": 422028,
+    "title": "Ortovox"
+  },
+  "osprey": {
+    "id": 301297,
+    "title": "Osprey"
+  },
+  "outdoor_research": {
+    "id": 507717,
+    "title": "Outdoor Research"
+  },
+  "paramo": {
+    "id": 1769728,
+    "title": "Paramo"
+  },
+  "patagonia": {
+    "id": 90804,
+    "title": "Patagonia"
+  },
+  "peak_performance": {
+    "id": 82834,
+    "title": "Peak Performance"
+  },
+  "rab": {
+    "id": 360051,
+    "title": "Rab"
+  },
+  "salewa": {
+    "id": 60412,
+    "title": "Salewa"
+  },
+  "salomon": {
+    "id": 15457,
+    "title": "Salomon"
+  },
+  "scarpa": {
+    "id": 23853,
+    "title": "Scarpa"
+  },
+  "sixtysix_north": {
+    "id": 4674793,
+    "title": "66\u00b0North"
+  },
+  "snow_peak": {
+    "id": 666350,
+    "title": "Snow Peak"
+  },
+  "stone_island": {
+    "id": 73306,
+    "title": "Stone Island"
+  },
+  "the_north_face": {
+    "id": 2319,
+    "title": "The North Face"
+  },
+  "topo_athletic": {
+    "id": 857780,
+    "title": "Topo Athletic"
+  },
+  "vasque": {
+    "id": 541574,
+    "title": "Vasque"
+  },
+  "veilance": {
+    "id": 3388210,
+    "title": "Veilance"
+  },
+  "visvim": {
+    "id": 276225,
+    "title": "Visvim"
+  },
+  "white_mountaineering": {
+    "id": 605090,
+    "title": "White Mountaineering"
+  },
+  "zamberlan": {
+    "id": 465062,
+    "title": "Zamberlan"
+  }
+}
