@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outdoor Gear Deals · Vinted UK</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>Outdoor Gear Deals</h1>
+    <p class="tagline">Bargains on outdoor clothing, spotted on Vinted UK.</p>
+    <p class="updated">Last updated {{ updated_at }}</p>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p class="disclaimer">
+      Not affiliated with Vinted. Prices and availability are scraped and may be
+      inaccurate or out of date — always check the original listing. Deals are
+      estimated against recent price history for each brand and category.
+    </p>
+  </footer>
+
+  <script src="static/sort.js"></script>
+</body>
+</html>

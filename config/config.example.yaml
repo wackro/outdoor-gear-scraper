@@ -1,0 +1,59 @@
+# Vinted UK outdoor-gear bargain scraper — configuration.
+#
+# Copy this file to config/config.yaml and adjust. The scraper reads
+# config/config.yaml by default (override with the CONFIG_PATH env var).
+
+# Currency to request and to treat as valid. Items in other currencies are skipped.
+currency: GBP
+
+# Base site. Vinted UK for GBP.
+base_url: https://www.vinted.co.uk
+
+scrape:
+  per_page: 96              # Vinted max is 96
+  order: newest_first       # we only care about fresh listings
+  max_pages_per_query: 3    # politeness cap: pages fetched per brand+category
+  min_delay_sec: 2.5        # random delay between requests (lower bound)
+  max_delay_sec: 5.0        # random delay between requests (upper bound)
+  impersonate: chrome       # curl_cffi browser fingerprint (beats DataDome JA3 checks)
+  max_retries: 3            # per-request retries on transient/anti-bot failures
+
+deals:
+  threshold: 0.30           # flag when price <= median * (1 - threshold)  => 30%+ below median
+  min_samples: 8            # need at least this many observations before a bracket can flag deals
+  window_days: 90           # only observations within this window feed the baseline
+  stale_days: 5             # items unseen for this long are marked inactive (likely sold)
+
+# Categories: friendly name -> Vinted catalog_id.
+# Find the id by browsing a category on vinted.co.uk and reading `catalog[]=NNNN` from the URL.
+categories:
+  mens_outerwear: 2052
+  womens_outerwear: 1067
+
+# Brands to watch: friendly name -> settings.
+#   id:        Vinted brand id (required). Read `brand_ids[]=NNN` from a brand search URL.
+#   threshold: optional per-brand override of deals.threshold.
+#   rrp:       optional map of category -> retail price (GBP), used later as an RRP fallback.
+#
+# NOTE: the ids below are PLACEHOLDERS. Verify each against the live site before first run
+# (see README > "Adding or verifying brands").
+brands:
+  arcteryx:
+    id: 40088
+    threshold: 0.35
+  patagonia:
+    id: 6392
+  rab:
+    id: 250134
+  montane:
+    id: 89197
+  the_north_face:
+    id: 2319
+  fjallraven:
+    id: 45447
+  mammut:
+    id: 71766
+  berghaus:
+    id: 34099
+  haglofs:
+    id: 249649

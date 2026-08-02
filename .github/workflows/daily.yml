@@ -1,0 +1,55 @@
+name: daily-vinted-deals
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily ~06:17 UTC (off-the-hour to avoid congestion)
+  workflow_dispatch: {}     # allow manual runs
+
+permissions:
+  contents: write           # commit the updated DB + generated site
+
+concurrency:
+  group: daily-vinted-deals
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Scrape and build site
+        id: run
+        env:
+          # Optional residential proxy if GitHub's shared IPs get blocked.
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python -m src.run
+        continue-on-error: true
+
+      - name: Commit data and site
+        if: steps.run.outcome == 'success'
+        run: |
+          git config user.name "deals-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/vinted.db docs/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: daily deals update $(date -u +%F)"
+            git push
+          fi
+
+      - name: Surface scrape failure
+        if: steps.run.outcome != 'success'
+        run: |
+          echo "::error::Scrape failed or returned no items — DB left untouched."
+          exit 1

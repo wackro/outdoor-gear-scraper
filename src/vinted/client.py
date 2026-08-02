@@ -1,0 +1,160 @@
+"""Vinted UK catalog client.
+
+Vinted has no public API. This talks to the same internal JSON endpoint the
+website uses (`/api/v2/catalog/items`). Two things make that work reliably:
+
+  1. A session must first be bootstrapped by loading the homepage, which sets the
+     anonymous cookies the API requires.
+  2. Vinted fronts everything with DataDome, which fingerprints the TLS/JA3
+     handshake. Plain `requests`/`httpx` get blocked quickly, so we use
+     `curl_cffi` with browser impersonation to present a real browser fingerprint.
+
+This is an undocumented endpoint and may change or block without notice — every
+response is parsed defensively and failures are surfaced, not swallowed silently.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import random
+import time
+
+from curl_cffi import requests
+
+from ..config import Config
+from .models import VintedItem
+
+log = logging.getLogger(__name__)
+
+CATALOG_PATH = "/api/v2/catalog/items"
+
+
+class VintedError(RuntimeError):
+    """Raised when the catalog cannot be fetched after retries."""
+
+
+class VintedClient:
+    def __init__(self, config: Config):
+        self.config = config
+        self.base_url = config.base_url
+        self._session: requests.Session | None = None
+
+    # -- session management --------------------------------------------------
+
+    def _new_session(self) -> requests.Session:
+        session = requests.Session(impersonate=self.config.scrape.impersonate)
+        proxy = os.environ.get("PROXY_URL")
+        if proxy:
+            session.proxies = {"http": proxy, "https": proxy}
+        return session
+
+    def bootstrap(self) -> None:
+        """Load the homepage to obtain the anonymous session cookies."""
+        self._session = self._new_session()
+        resp = self._session.get(self.base_url, timeout=30)
+        if resp.status_code >= 400:
+            raise VintedError(f"Session bootstrap failed (HTTP {resp.status_code}).")
+        log.info("Bootstrapped Vinted session (%d cookies).", len(self._session.cookies))
+
+    def _ensure_session(self) -> requests.Session:
+        if self._session is None:
+            self.bootstrap()
+        assert self._session is not None
+        return self._session
+
+    # -- fetching ------------------------------------------------------------
+
+    def _get_page(self, brand_id: int, catalog_id: int, page: int) -> list[dict]:
+        params = {
+            "page": page,
+            "per_page": self.config.scrape.per_page,
+            "order": self.config.scrape.order,
+            "catalog_ids": catalog_id,
+            "brand_ids": brand_id,
+            "currency": self.config.currency,
+        }
+        headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+
+        last_error: Exception | None = None
+        for attempt in range(1, self.config.scrape.max_retries + 1):
+            try:
+                session = self._ensure_session()  # may (re-)bootstrap
+                resp = session.get(
+                    self.base_url + CATALOG_PATH,
+                    params=params,
+                    headers=headers,
+                    timeout=30,
+                )
+            except Exception as exc:  # network / curl / bootstrap errors
+                last_error = exc
+                self._session = None  # force a fresh session on the next attempt
+                log.warning("Request error (attempt %d): %s", attempt, exc)
+            else:
+                if resp.status_code in (401, 403):
+                    # Session likely expired or was challenged — rebuild and retry.
+                    log.warning("HTTP %d; re-bootstrapping session.", resp.status_code)
+                    self._session = None
+                    last_error = VintedError(f"HTTP {resp.status_code}")
+                elif resp.status_code == 429:
+                    last_error = VintedError("HTTP 429 (rate limited)")
+                    log.warning("Rate limited (attempt %d).", attempt)
+                elif resp.status_code >= 400:
+                    raise VintedError(f"HTTP {resp.status_code} for {resp.url}")
+                else:
+                    try:
+                        return resp.json().get("items") or []
+                    except ValueError as exc:
+                        last_error = exc
+                        log.warning("Non-JSON response (attempt %d).", attempt)
+
+            if attempt < self.config.scrape.max_retries:
+                time.sleep(2 ** attempt)  # exponential backoff: 2s, 4s, ...
+
+        raise VintedError(
+            f"Failed to fetch brand={brand_id} catalog={catalog_id} page={page}: {last_error}"
+        )
+
+    def fetch_items(self, brand_id: int, catalog_id: int) -> list[VintedItem]:
+        """Fetch newest items for a brand+category across the configured page cap."""
+        items: list[VintedItem] = []
+        for page in range(1, self.config.scrape.max_pages_per_query + 1):
+            raw_items = self._get_page(brand_id, catalog_id, page)
+            if not raw_items:
+                break
+            for raw in raw_items:
+                item = VintedItem.from_json(raw, base_url=self.base_url)
+                if item is None:
+                    continue
+                if item.currency and item.currency != self.config.currency:
+                    continue  # ignore listings priced in another currency
+                items.append(item)
+            if len(raw_items) < self.config.scrape.per_page:
+                break  # last page
+            self._sleep()
+        return items
+
+    def _sleep(self) -> None:
+        delay = random.uniform(
+            self.config.scrape.min_delay_sec, self.config.scrape.max_delay_sec
+        )
+        time.sleep(delay)
+
+
+def _smoke_test() -> None:
+    """Manual smoke test: fetch one brand+category and print a few items."""
+    logging.basicConfig(level=logging.INFO)
+    from ..config import load_config
+
+    config = load_config()
+    client = VintedClient(config)
+    brand = config.brands[0]
+    category_name, catalog_id = next(iter(config.categories.items()))
+    print(f"Fetching {brand.name} / {category_name} (brand={brand.id}, catalog={catalog_id})")
+    items = client.fetch_items(brand.id, catalog_id)
+    print(f"Got {len(items)} items")
+    for item in items[:5]:
+        print(f"  £{item.price:>7.2f}  {item.brand_title:<15} {item.size:<8} {item.title[:40]}")
+
+
+if __name__ == "__main__":
+    _smoke_test()

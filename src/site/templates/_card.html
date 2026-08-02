@@ -1,0 +1,33 @@
+<article class="card"
+         data-brand="{{ deal.brand }}"
+         data-category="{{ deal.category }}"
+         data-discount="{{ deal.discount_pct }}"
+         data-score="{{ deal.deal_score }}"
+         data-price="{{ deal.price }}"
+         data-first-seen="{{ deal.first_seen }}">
+  <a class="card-link" href="{{ deal.url }}" target="_blank" rel="noopener noreferrer">
+    <div class="card-image">
+      {% if deal.image_url %}
+      <img src="{{ deal.image_url }}" alt="{{ deal.brand_title }} {{ deal.title }}" loading="lazy">
+      {% else %}
+      <div class="no-image">No image</div>
+      {% endif %}
+      <span class="discount-badge">-{{ deal.discount_pct }}%</span>
+    </div>
+    <div class="card-body">
+      <p class="card-brand">{{ deal.brand_title or deal.brand_label }}</p>
+      <h2 class="card-title">{{ deal.title }}</h2>
+      <p class="card-meta">
+        <span class="category">{{ deal.category_label }}</span>
+        {% if deal.size %}<span class="size">Size {{ deal.size }}</span>{% endif %}
+      </p>
+      <p class="card-price">
+        <span class="price">{{ currency_symbol }}{{ '%.2f'|format(deal.price) }}</span>
+        <span class="baseline">
+          vs {{ currency_symbol }}{{ '%.2f'|format(deal.baseline) }}
+          {% if deal.baseline_src == 'rrp' %}RRP{% else %}median{% endif %}
+        </span>
+      </p>
+    </div>
+  </a>
+</article>

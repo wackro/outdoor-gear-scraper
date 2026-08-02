@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Local overrides
+config/config.local.yaml
+
+# OS
+.DS_Store
+
+# NOTE: data/vinted.db and docs/ are intentionally committed —
+# the SQLite DB is the persistence layer and docs/ is published to Pages.

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="controls">
+  <div class="control">
+    <label for="sort">Sort by</label>
+    <select id="sort">
+      <option value="discount">Biggest discount</option>
+      <option value="score">Deal score</option>
+      <option value="recent">Most recent</option>
+      <option value="price-asc">Price: low to high</option>
+      <option value="price-desc">Price: high to low</option>
+    </select>
+  </div>
+  <div class="control">
+    <label for="brand">Brand</label>
+    <select id="brand">
+      <option value="">All brands</option>
+      {% for value, label in brand_filters %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="control">
+    <label for="category">Category</label>
+    <select id="category">
+      <option value="">All categories</option>
+      {% for value, label in category_filters %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <p class="count"><span id="visible-count">{{ deals|length }}</span> deals</p>
+</section>
+
+{% if deals %}
+<section id="deals" class="deal-grid">
+  {% for deal in deals %}
+  {% include "_card.html" %}
+  {% endfor %}
+</section>
+<p id="empty-state" class="empty" hidden>No deals match those filters.</p>
+{% else %}
+<section class="empty">
+  <p><strong>No deals yet.</strong></p>
+  <p>
+    Deals are judged against each brand's recent price history, which needs a
+    week or two of daily scraping to build up. Check back soon — or add retail
+    prices (RRP) to the config to surface deals sooner.
+  </p>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outdoor Gear Deals · Vinted UK</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>Outdoor Gear Deals</h1>
+    <p class="tagline">Bargains on outdoor clothing, spotted on Vinted UK.</p>
+    <p class="updated">Last updated 2026-08-02 14:17 UTC</p>
+  </header>
+
+  <main>
+    
+<section class="controls">
+  <div class="control">
+    <label for="sort">Sort by</label>
+    <select id="sort">
+      <option value="discount">Biggest discount</option>
+      <option value="score">Deal score</option>
+      <option value="recent">Most recent</option>
+      <option value="price-asc">Price: low to high</option>
+      <option value="price-desc">Price: high to low</option>
+    </select>
+  </div>
+  <div class="control">
+    <label for="brand">Brand</label>
+    <select id="brand">
+      <option value="">All brands</option>
+      
+    </select>
+  </div>
+  <div class="control">
+    <label for="category">Category</label>
+    <select id="category">
+      <option value="">All categories</option>
+      
+    </select>
+  </div>
+  <p class="count"><span id="visible-count">0</span> deals</p>
+</section>
+
+
+<section class="empty">
+  <p><strong>No deals yet.</strong></p>
+  <p>
+    Deals are judged against each brand's recent price history, which needs a
+    week or two of daily scraping to build up. Check back soon — or add retail
+    prices (RRP) to the config to surface deals sooner.
+  </p>
+</section>
+
+
+  </main>
+
+  <footer class="site-footer">
+    <p class="disclaimer">
+      Not affiliated with Vinted. Prices and availability are scraped and may be
+      inaccurate or out of date — always check the original listing. Deals are
+      estimated against recent price history for each brand and category.
+    </p>
+  </footer>
+
+  <script src="static/sort.js"></script>
+</body>
+</html>
