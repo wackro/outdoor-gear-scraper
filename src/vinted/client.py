@@ -28,6 +28,7 @@ from .models import VintedItem
 log = logging.getLogger(__name__)
 
 CATALOG_PATH = "/api/v2/catalog/items"
+BRANDS_PATH = "/api/v2/brands"
 
 
 def _norm(text: str) -> str:
@@ -75,8 +76,8 @@ class VintedClient:
 
     # -- fetching ------------------------------------------------------------
 
-    def _request(self, params: dict) -> list[dict]:
-        """Call the catalog endpoint with retries/backoff; return the item list."""
+    def _request(self, params: dict, path: str = CATALOG_PATH, result_key: str = "items") -> list[dict]:
+        """Call a Vinted API endpoint with retries/backoff; return the result list."""
         headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
 
         last_error: Exception | None = None
@@ -84,7 +85,7 @@ class VintedClient:
             try:
                 session = self._ensure_session()  # may (re-)bootstrap
                 resp = session.get(
-                    self.base_url + CATALOG_PATH,
+                    self.base_url + path,
                     params=params,
                     headers=headers,
                     timeout=30,
@@ -106,7 +107,7 @@ class VintedClient:
                     raise VintedError(f"HTTP {resp.status_code} for {resp.url}")
                 else:
                     try:
-                        return resp.json().get("items") or []
+                        return resp.json().get(result_key) or []
                     except ValueError as exc:
                         last_error = exc
                         log.warning("Non-JSON response (attempt %d).", attempt)
@@ -129,43 +130,23 @@ class VintedClient:
         )
 
     def resolve_brand_id(self, search_text: str) -> int | None:
-        """Resolve a brand name to its Vinted brand id.
+        """Resolve a brand name to its Vinted brand id via the brand endpoint.
 
-        Searches the catalog by text (no brand filter) and picks the brand id
-        whose title best matches `search_text` — an exact (accent/-case-folded)
-        match wins, otherwise the most common close match among the results.
-        Returns None if nothing matches, so callers can fall back to a config id.
+        `GET /api/v2/brands?keyword=<name>` returns the matching brands. We pick
+        the one whose title equals the search (accent/case-folded); failing that,
+        the first close match. Returns None if nothing matches, so callers can
+        fall back to a configured id.
         """
-        raw = self._request(
-            {
-                "page": 1,
-                "per_page": self.config.scrape.per_page,
-                "order": self.config.scrape.order,
-                "search_text": search_text,
-                "currency": self.config.currency,
-            }
-        )
+        brands = self._request({"keyword": search_text}, path=BRANDS_PATH, result_key="brands")
         target = _norm(search_text)
-        counts: dict[int, int] = {}
-        titles: dict[int, str] = {}
-        for item in raw:
-            bid = item.get("brand_id") or (item.get("brand") or {}).get("id")
-            title = item.get("brand_title") or (item.get("brand") or {}).get("title")
-            if not bid or not title:
-                continue
-            counts[bid] = counts.get(bid, 0) + 1
-            titles[bid] = title
 
-        exact = [bid for bid, t in titles.items() if _norm(t) == target]
-        if exact:
-            return int(exact[0])
-        partial = [
-            (counts[bid], bid)
-            for bid, t in titles.items()
-            if target and (target in _norm(t) or _norm(t) in target)
-        ]
-        if partial:
-            return int(max(partial)[1])
+        for brand in brands:
+            if brand.get("id") and _norm(brand.get("title", "")) == target:
+                return int(brand["id"])
+        for brand in brands:
+            title = _norm(brand.get("title", ""))
+            if brand.get("id") and title and (target in title or title in target):
+                return int(brand["id"])
         return None
 
     def fetch_items(self, brand_id: int, catalog_id: int) -> list[VintedItem]:
@@ -202,9 +183,10 @@ def _smoke_test() -> None:
     config = load_config()
     client = VintedClient(config)
     brand = config.brands[0]
+    brand_id = client.resolve_brand_id(brand.search_text) or brand.id
     category_name, catalog_id = next(iter(config.categories.items()))
-    print(f"Fetching {brand.name} / {category_name} (brand={brand.id}, catalog={catalog_id})")
-    items = client.fetch_items(brand.id, catalog_id)
+    print(f"Fetching {brand.name} / {category_name} (brand={brand_id}, catalog={catalog_id})")
+    items = client.fetch_items(brand_id, catalog_id)
     print(f"Got {len(items)} items")
     for item in items[:5]:
         print(f"  £{item.price:>7.2f}  {item.brand_title:<15} {item.size:<8} {item.title[:40]}")
