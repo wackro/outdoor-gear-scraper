@@ -1,13 +1,15 @@
 # Chalk and Rails — London commuter town study
 
-**September 2026 · 16 towns assessed across 5 corridors**
+**September 2026 · 20 towns assessed across 6 corridors**
 
 Brief: two people moving in together outside London. One commuting 3 days/week
 (down from 5), one 2 days/week. Destinations: the City / Moorgate / Liverpool
 Street, and King's Cross / St Pancras / Euston. Hard requirements: combined
 outgoings must not rise; ≤1 hour door to door; walkable station. Priorities:
 cost saving, commute, access to proper nature (hills, hikes, open space),
-quality of the place.
+quality of the place. Added later: a dedicated oriental grocer, door-to-door
+reach of a Taiwanese (traditional characters + bopomofo) Mandarin school, and
+convenience of visiting parents in Tibberton, Shropshire.
 
 Published report: https://claude.ai/code/artifact/d6526763-6756-4957-ab5e-a5b6401ab4a6
 
@@ -165,3 +167,150 @@ Berkhamsted–Euston ADR £29.80; Hemel–Euston ADR £28.00; TfL caps for zones
 and extended using confirmed national ratios. Rents are 2026 asking rents for
 two-bed properties cross-checked against ONS local authority private rent data.
 Individual pounds may move; the structure and rank order are sound.
+
+---
+
+## 10. Life logistics (added dimension)
+
+### Annual travel ledger — the method
+
+All recurring journeys converted to one currency: trips/year × door-to-door
+time. Assumes 132 + 88 commutes, ~35 term-time Mandarin classes, ~18 grocery
+runs, 8 drives to Tibberton — all round trips, the last three by car.
+
+**Key finding: the commute is 80–88% of all travel hours** (median non-commute
+share 15%). The Tibberton trips alone are ~6–8%, i.e. about 35 hours a year.
+So the train-line convenience should break ties, not pick the town.
+
+**Second finding: the spread is 276 h/yr** — St Albans 418 h to Tring 693 h,
+about seven working weeks, driven overwhelmingly by the commute.
+
+| Town | Commute | School | Grocery | Tibberton | Total | Non-commute |
+|---|---:|---:|---:|---:|---:|---:|
+| St Albans City | 367 | 6 | 9 | 36 | **418** | 51 |
+| Watford Junction | 367 | 23 | 3 | 37 | **431** | 64 |
+| Leagrave / Luton | 389 | 29 | 3 | 33 | **454** | 66 |
+| Hatfield | 403 | 18 | 3 | 39 | **462** | 59 |
+| Harpenden | 403 | 18 | 9 | 35 | **465** | 62 |
+| Stevenage | 389 | 33 | 5 | 43 | **469** | 80 |
+| Hemel Hempstead | 418 | 23 | 11 | 35 | **487** | 69 |
+| Berkhamsted | 411 | 32 | 12 | 35 | **489** | 78 |
+| Hitchin | 422 | 33 | 3 | 41 | **499** | 77 |
+| Chorleywood | 444 | 29 | 6 | 37 | **516** | 72 |
+| Bishop's Stortford | 414 | 41 | 15 | 48 | **518** | 104 |
+| Milton Keynes | 440 | 47 | 3 | 31 | **520** | 80 |
+| Amersham | 455 | 35 | 12 | 37 | **539** | 84 |
+| Hertford North | 466 | 29 | 9 | 43 | **547** | 81 |
+| Letchworth | 462 | 37 | 5 | 43 | **547** | 85 |
+| Great Missenden | 495 | 41 | 9 | 36 | **581** | 86 |
+| Royston | 488 | 47 | 12 | 47 | **593** | 105 |
+| Princes Risborough | 513 | 47 | 7 | 35 | **602** | 89 |
+| Wendover | 539 | 47 | 6 | 35 | **626** | 87 |
+| Tring | 609 | 35 | 15 | 35 | **693** | 85 |
+
+### Taiwanese Mandarin schooling
+
+Four Taiwan Centres for Mandarin Learning (TCML) in the UK, all OCAC-funded
+from Taiwan and therefore teaching traditional characters:
+
+- **Hua Hsia Chinese School** (the first UK TCML, est. 2001) — branches at Mill
+  Hill (HQ, 98 The Broadway NW7), Hampstead (NW3 5SQ), East Barnet and
+  **St Albans**. Traditional-character Heritage classes run at the St Albans
+  branch, Sat & Sun 10:00–11:50. Also runs adult classes (70+ students across
+  seven classes as of 2023) and nursery classes. Ages 3–80.
+- Chinese Learning Paradise — Kent (2nd UK TCML)
+- Tzu Chi Academy — Woodford Green (3rd, opened Jan 2024, adults 18+)
+- Play Mandarin — Wimbledon
+
+Fallback (traditional characters, not Taiwan-affiliated, bopomofo unconfirmed):
+**Watford Chinese Community School**, Sundays 10:30–12:45, ages 4–GCSE. Also
+Milton Keynes Chinese School (Sundays) and Buckinghamshire Chinese Language
+School (High Wycombe).
+
+Scored on **drive time**, not rail — the branches are orbital North London,
+which rail serves badly and a car serves well.
+
+### Tibberton, Shropshire
+
+**Keep using Stafford.** Euston→Stafford is 1h16 direct; Euston→Telford Central
+is 2h07 with a change at Birmingham; Euston→Wellington 2h26. Telford and
+Wellington sit on a branch off Wolverhampton, not the fast line (Wellington→
+Stafford alone is 34 min and needs a change). Stafford plus a ~25 min pickup
+wins by nearly an hour.
+
+Consequence: Stafford is a West Coast Main Line station, so parents travel
+**direct** from Milton Keynes or Watford Junction, **one change and no London**
+from Berkhamsted/Tring/Hemel, and Euston-plus-a-luggage-walk everywhere else.
+
+| Town | Oriental grocer | Nearest Hua Hsia | Your drive | Their train from Stafford |
+|---|---|---|---:|---|
+| Hitchin | Y-Mart, 11 Churchgate — in town | St Albans 28 min | 2h35 | Euston + walk to KX |
+| Leagrave / Luton | In Luton | St Albans 25 min | 2h05 | Euston + walk to St Pancras |
+| Berkhamsted | Watford 20 min | St Albans 25 min | 2h10 | One change, no London |
+| Amersham | Watford 20 min | Mill Hill 30 min | 2h20 | Euston + tube + Met |
+| Watford Junction | In town | In town (Watford Chinese School) | 2h20 | Direct |
+| Great Missenden | High Wycombe 15 min | Mill Hill 35 min | 2h15 | Euston + tube + Chiltern |
+| Stevenage | In town / Hitchin 8 min | St Albans 28 min | 2h40 | Euston + walk to KX |
+| Hertford North | Hatfield 15 min | East Barnet 25 min | 2h40 | Euston + walk to KX |
+| Hemel Hempstead | Watford 18 min | St Albans 20 min | 2h10 | One change, no London |
+| Hatfield | In town | St Albans 15 min | 2h25 | Euston + walk to KX |
+| Chorleywood | Watford 10 min | Mill Hill 25 min | 2h20 | Euston + tube + Met |
+| Princes Risborough | High Wycombe 12 min | Mill Hill 40 min | 2h10 | Euston + tube + Chiltern |
+| Letchworth | Interfood — in town | St Albans 32 min | 2h40 | Euston + walk to KX |
+| Wendover | Aylesbury 10 min | St Albans 40 min | 2h10 | Euston + tube + Chiltern |
+| Royston | Hitchin 20 min | St Albans 40 min | 2h55 | Euston + walk to KX |
+| St Albans City | Hatfield/Borehamwood 15 min | In town, 5 min | 2h15 | Euston + walk to St Pancras |
+| Tring | Watford 25 min | St Albans 30 min | 2h10 | One change, no London |
+| Harpenden | Hatfield 15 min | St Albans 15 min | 2h12 | Euston + walk to St Pancras |
+| Milton Keynes | Central Oriental — in town | St Albans 40 min | 1h55 | Direct |
+| Bishop's Stortford | Harlow 25 min | East Barnet 35 min | 3h00 | Euston + tube + Liverpool St |
+
+## 11. Revised ranking (5 dimensions)
+
+Weights: nature 25%, cost 22%, commute 20%, life logistics 20%, town 13%.
+Logistics = grocer 40% + school 35% + Tibberton 25%; Tibberton = 60% your
+drive + 40% their train.
+
+| # | Town | Nature | Cost | Commute | Town | Logistics | Total | Saving |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | Hitchin | 7.0 | 8.7 | 8.0 | 9.0 | 8.03 | **8.03** | +703 |
+| 2 | Leagrave / Luton | 7.0 | 9.0 | 9.0 | 3.0 | 8.34 | **7.59** | +729 |
+| 3 | Berkhamsted | 9.0 | 4.4 | 8.0 | 9.0 | 7.48 | **7.49** | +396 |
+| 4 | Amersham | 9.0 | 7.2 | 6.0 | 8.0 | 6.75 | **7.43** | +601 |
+| 5 | Watford Junction | 5.5 | 6.2 | 9.5 | 6.0 | 9.07 | **7.24** | +528 |
+| 6 | Great Missenden | 10.0 | 7.4 | 4.0 | 7.0 | 6.48 | **7.12** | +609 |
+| 7 | Stevenage | 5.0 | 8.6 | 9.5 | 5.0 | 7.15 | **7.12** | +699 |
+| 8 | Hertford North | 5.0 | 9.8 | 5.5 | 8.0 | 7.15 | **6.98** | +786 |
+| 9 | Hemel Hempstead | 7.0 | 6.2 | 8.0 | 5.0 | 8.03 | **6.97** | +527 |
+| 10 | Hatfield | 4.0 | 8.4 | 8.5 | 4.5 | 8.72 | **6.87** | +683 |
+| 11 | Chorleywood | 8.0 | 4.9 | 6.5 | 7.0 | 7.72 | **6.83** | +431 |
+| 12 | Princes Risborough | 9.5 | 6.9 | 3.5 | 6.5 | 6.41 | **6.71** | +573 |
+| 13 | Letchworth | 5.0 | 8.3 | 6.0 | 7.0 | 7.37 | **6.67** | +680 |
+| 14 | Wendover | 10.0 | 6.3 | 3.0 | 7.0 | 6.01 | **6.60** | +532 |
+| 15 | Royston | 7.0 | 9.9 | 4.5 | 5.0 | 5.43 | **6.56** | +790 |
+| 16 | St Albans City | 5.0 | 1.7 | 10.0 | 9.0 | 8.48 | **6.48** | +199 |
+| 17 | Tring | 10.0 | 4.6 | 3.0 | 7.0 | 6.91 | **6.40** | +409 |
+| 18 | Harpenden | 6.0 | 2.3 | 8.5 | 8.0 | 8.18 | **6.39** | +247 |
+| 19 | Milton Keynes | 4.0 | 4.5 | 7.5 | 5.5 | 8.25 | **5.86** | +404 |
+| 20 | Bishop's Stortford | 4.0 | 7.0 | 7.0 | 7.0 | 4.38 | **5.71** | +580 |
+
+New towns added: Watford Junction (rent £1,650, travel £352), Hatfield (£1,416
+/ £431), Milton Keynes (£1,350 / £776), Princes Risborough (£1,250 / £707).
+
+**Notes on the movement:**
+
+- **Hitchin holds first** — the risk that it lacked an oriental grocer proved
+  false (Y-Mart, town centre).
+- **St Albans stays 16th despite hosting the Taiwanese school in town** and
+  having the best commute of all twenty. A £199/month saving is too thin for a
+  near-perfect logistics score to rescue. This is the study's sharpest lesson.
+- **Milton Keynes wins Tibberton outright** (closest drive, direct train for
+  parents, big oriental supermarket in town) and finishes 19th — fares of
+  ~£776/month for the two of you, and no countryside.
+- **Watford Junction** is the strongest newcomer at 5th: best logistics score
+  of any town (9.07), 16-minute commute, cheap Oyster fares. Weak nature.
+
+**Additional verification items:** confirm the Hua Hsia adult-class timetable
+actually runs at St Albans; confirm the Watford Junction Oyster fare (it sits
+outside zones 1–9 on a special fare and sources conflict on whether contactless
+is accepted on London Northwestern as well as the Overground).
