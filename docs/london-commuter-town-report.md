@@ -1,6 +1,6 @@
 # Chalk and Rails — London commuter town study
 
-**September 2026 · 20 towns assessed across 6 corridors**
+**September 2026 · 22 towns assessed across 7 corridors**
 
 Brief: two people moving in together outside London. One commuting 3 days/week
 (down from 5), one 2 days/week. Destinations: the City / Moorgate / Liverpool
@@ -314,3 +314,88 @@ New towns added: Watford Junction (rent £1,650, travel £352), Hatfield (£1,41
 actually runs at St Albans; confirm the Watford Junction Oyster fare (it sits
 outside zones 1–9 on a special fare and sources conflict on whether contactless
 is accepted on London Northwestern as well as the Overground).
+
+---
+
+## 12. Coverage sweep and corrected omissions
+
+The original candidate list was built corridor by corridor around stations
+serving both target termini. That method had a hole: **it sampled the Chiltern
+Aylesbury branch and skipped the Chiltern main line entirely**, which is the
+faster of the two. Two towns were wrongly left out.
+
+### Now included
+
+| Town | Line | To terminus | Rent | Travel | Saving | Score | Rank |
+|---|---|---:|---:|---:|---:|---:|---:|
+| **Leighton Buzzard** | West Coast | 30 min Euston | £1,125 | £690 | +£715 | 7.65 | **2nd** |
+| **High Wycombe** | Chiltern main line | 27 min Marylebone | £1,375 | £690 | +£465 | 7.05 | 9th |
+
+- **Leighton Buzzard** is the consequential miss — 30 min to Euston, the
+  cheapest 2-bed rents of any fast-commute town, on the WCML so parents change
+  once at Milton Keynes with no London, and Ivinghoe Beacon/Ridgeway ~15 min by
+  car. Held back by a modest town and a 35-min run to the Mandarin classes.
+- **High Wycombe** — 27 min to Marylebone (faster than Berkhamsted), Chilterns
+  proper (West Wycombe, Hughenden, Bradenham), and **Elane Asian Market in town
+  stocking Taiwanese goods** — the best grocery position of any candidate.
+  Chiltern runs direct Birmingham–High Wycombe trains, giving parents a
+  no-London option. Costs: dated town centre, and Mill Hill is a 40-min drive.
+
+### Revised top of the table
+
+1. Hitchin 8.03 · 2. **Leighton Buzzard 7.65** · 3. Leagrave/Luton 7.59 ·
+4. Berkhamsted 7.49 · 5. Amersham 7.43 · 6. Watford Junction 7.24 ·
+7. Great Missenden 7.12 · 8. Stevenage 7.12 · 9. **High Wycombe 7.05** ·
+10. Hertford North 6.98 · 11. Hemel Hempstead 6.97 · 12. Hatfield 6.87 ·
+13. Chorleywood 6.83
+
+St Albans now finishes 18th; Bishop's Stortford remains last.
+
+### Considered and excluded
+
+**Chiltern main line (Marylebone)** — Gerrards Cross 17 min (outer suburbia, no
+escarpment, saving erased by rent); Beaconsfield 23 min (rents ~£1,750 leave
+~£120/month); Seer Green & Jordans 28 min (no rental market); Saunderton 35 min
+(request stop, almost no housing).
+
+**Chiltern Aylesbury branch / Metropolitan** — **Aylesbury 55 min: fails
+outright**, ~80 min door-to-door to King's Cross and ~93 to the City, despite
+Oriental's Best in town and good Chilterns access; Aylesbury Vale Parkway ~60
+min; Stoke Mandeville ~50 min; Chesham ~60 min (slow Met branch); Chalfont &
+Latimer Zone 8 (comparable to Amersham, £21.00 cap — omitted only as a near
+duplicate); Rickmansworth Zone 7 (Chorleywood's fares with cheaper rent — worth
+a look if Chorleywood appeals but its rent doesn't).
+
+**West Coast** — Kings Langley / Apsley 28–30 min (thin housing markets, little
+town life); Cheddington ~40 min (tiny village under Ivinghoe Beacon, superb
+walking, hourly service); Bletchley / Wolverton ~40 min (weak nature, MK fares).
+
+**Thameslink / MML** — Elstree & Borehamwood 22 min (Zone 6, has an oriental
+store, but suburban London and no hills); Radlett 24 min (thin saving, flat);
+Harlington, Beds ~38 min (under Sharpenhoe Clappers, genuinely good nature, but
+tiny rental market and half-hourly service); Flitwick ~40 min (commute at the
+limit); Bedford 40–50 min.
+
+**East Coast / Great Northern** — Potters Bar 20 min (suburban, no hills);
+Welwyn Garden City / Welwyn North 25–28 min (weak nature); Knebworth 27 min (no
+escarpment); Baldock ~35 min (Weston Hills modest); Ashwell & Morden ~45 min.
+
+**Elizabeth line** — a corridor not originally considered, and notable for
+serving Farringdon *and* Liverpool Street directly. Taplow/Burnham/Maidenhead
+are 40–50 min to Farringdon; rejected on nature (Thames valley and Burnham
+Beeches are woods and river, not escarpment) and rent, not connectivity.
+
+**Southern / South Western** — ruled out at the outset: poor for both King's
+Cross and the City, and the Surrey Hills sit on the opposite side of London from
+Shropshire, worsening both the parent drive and the Mill Hill run.
+
+### Two patterns behind the exclusions
+
+1. **The 35-minute rule does most of the work.** A one-hour door-to-door limit
+   leaves ~35 min of train time after the walk, the margin and the London end.
+   That single constraint removes Aylesbury, Bedford, Chesham and everything
+   beyond — and it is why the best Chiltern countryside keeps failing.
+2. **Then rent removes the fast ones.** Gerrards Cross, Beaconsfield, Radlett
+   and Elstree all clear the time test and fail the money test, exactly as St
+   Albans and Harpenden do. The band surviving both is narrow, and that is where
+   all 22 ranked towns sit.
