@@ -1,6 +1,6 @@
 # Chalk and Rails — London commuter town study
 
-**September 2026 · 22 towns assessed across 7 corridors**
+**September 2026 · 23 towns assessed across 8 corridors**
 
 Brief: two people moving in together outside London. One commuting 3 days/week
 (down from 5), one 2 days/week. Destinations: the City / Moorgate / Liverpool
@@ -399,3 +399,67 @@ Shropshire, worsening both the parent drive and the Mill Hill run.
    and Elstree all clear the time test and fail the money test, exactly as St
    Albans and Harpenden do. The band surviving both is narrow, and that is where
    all 22 ranked towns sit.
+
+---
+
+## 13. Kingston upon Thames (added by request)
+
+**Frame note:** Kingston is a London borough in Zone 6, not somewhere outside
+London, so it sits outside the original brief rather than inside the ranking on
+equal terms. Included because it was explicitly requested.
+
+| Metric | Value |
+|---|---|
+| Line | South Western to Waterloo, 31 min, every 15 min |
+| Zone | 6 — Oyster/contactless, £16.30 daily cap covers train **and** tube |
+| Rent (2-bed) | ~£1,900 (borough all-types average £1,803, May 2026) |
+| Travel (both) | £319/month |
+| Total | £2,219 → **saving £311** |
+| Door-to-door | City **58 min** / King's Cross **62 min** |
+| Score | **6.53 — 18th of 23** |
+
+Component scores: nature 6.5 · cost 3.2 · commute 7.0 · town 8.5 · logistics 8.44
+
+### What it wins
+
+- **Groceries — best in the study by a distance.** New Malden, 10 minutes away,
+  has the largest Korean population in Europe: H Mart (sole UK branch), Korea
+  Foods, Central Oriental, Seven Stars, Song's, Yau Brothers.
+- **Mandarin school.** Play Mandarin TCML, Wimbledon (~10 min by train) is
+  Taiwan-funded, teaches Mandarin with Taiwanese characteristics, is built for
+  **adults**, and runs drop-in booking with no termly intakes and rolling
+  credits — a better structural fit for "classes for us" than Hua Hsia's fixed
+  Sat/Sun timetable.
+- **Open space.** Richmond Park (2,500 acres), Bushy Park (1,100), Wimbledon
+  Common (1,140), Home Park, Thames towpath — more accessible open space than
+  anywhere else assessed.
+- **Town quality 8.5** — riverside, market place, strong restaurant scene,
+  Rose Theatre.
+- **Cheap fares.** Zone 6 contactless at £16.30/day covers the whole door-to-door
+  journey including tube legs.
+
+### Why it still finishes 18th
+
+- **Rent leaves only ~£311/month saving** — the same trap as St Albans (£199)
+  and Harpenden (£247). Zone 6 fares can't offset Kingston rents.
+- **Worst-placed town for Shropshire:** ~2h50 drive, the longest of any
+  candidate, and parents cross London on top (Euston → Northern line → Waterloo
+  → SWR).
+- **No hills.** Wide open spaces in abundance, no escarpment at all. North Downs
+  (Box Hill, Ranmore) are a 35–40 min drive versus the Chilterns being 15 min
+  from Berkhamsted. This one is a judgement call, not a data point.
+
+### Structural oddity worth knowing
+
+Kingston is the **only candidate whose line serves neither destination
+directly** — but the Waterloo & City line reaches Bank in four minutes, making
+it the one town here that is **faster to the City (58) than to King's Cross
+(62)**. Every other candidate is the reverse.
+
+### Consistency caveat
+
+If Zone 6 London is in scope, so are options excluded partly for being suburban
+London — Elstree & Borehamwood, Radlett, Potters Bar — plus Richmond,
+Twickenham, Chingford (Epping Forest) and Orpington (North Downs). Kingston is
+currently a one-off exception; widening the sweep to Zone 5–6 London would need
+a separate pass.
