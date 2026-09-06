@@ -43,10 +43,6 @@
     "id": 31197,
     "title": "Eider"
   },
-  "fjallraven": {
-    "id": 81026,
-    "title": "Fj\u00e4llr\u00e4ven"
-  },
   "goldwin": {
     "id": 330213,
     "title": "Goldwin"
@@ -57,7 +53,7 @@
   },
   "haglofs": {
     "id": 245240,
-    "title": "Hagl\u00f6fs"
+    "title": "Haglöfs"
   },
   "hanwag": {
     "id": 181768,
@@ -85,7 +81,7 @@
   },
   "klattermusen": {
     "id": 1638071,
-    "title": "Kl\u00e4ttermusen"
+    "title": "Klättermusen"
   },
   "la_sportiva": {
     "id": 201320,
@@ -145,7 +141,7 @@
   },
   "norrona": {
     "id": 356632,
-    "title": "Norr\u00f8na"
+    "title": "Norrøna"
   },
   "ortlieb": {
     "id": 351947,
@@ -193,7 +189,7 @@
   },
   "sixtysix_north": {
     "id": 4674793,
-    "title": "66\u00b0North"
+    "title": "66°North"
   },
   "snow_peak": {
     "id": 666350,
