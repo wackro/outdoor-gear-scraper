@@ -21,3 +21,4 @@ config/config.local.yaml
 data/hot.db
 data/hot.db-wal
 data/hot.db-shm
+preview/

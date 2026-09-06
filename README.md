@@ -11,8 +11,7 @@ speeds:
   favourites unusually fast. That acceleration is the market valuing the item for
   you, and it is a far better bargain detector than price alone.
 - **The cold path** still runs once a day: it scrapes for price history, works
-  out per-brand baselines, and publishes everything it finds to a static site for
-  browsing at leisure.
+  out per-brand baselines, and rebuilds the website.
 
 No servers, no database service, no running costs: **GitHub Actions** does the
 work, a **SQLite file in the repo** stores the history, and the site is served
@@ -74,6 +73,34 @@ Tune `alerts.floor_favourites_per_hour` and `alerts.min_favourites_gain` from
 what you see. **Treat the shipped defaults as guesses** — they have not been
 calibrated against real traffic.
 
+## The website
+
+The site shows **only hot listings** — everything currently being tracked, ranked
+by how fast it is gaining attention. The old price-based deal grid is gone.
+
+- **It updates itself.** The page is a shell that polls a JSON feed the poller
+  republishes every few minutes; leave it open and it refreshes in place. A
+  daily-rebuilt page could only ever show listings that sold hours ago.
+- **Near-misses are visible too**, not just the ones that alerted. That is how
+  you tell whether the bar is set right: if the flagged listings look correct and
+  the top unflagged ones don't, it's about right. The current bar is displayed at
+  the top of the page.
+- **Sold listings stay, greyed, labelled "SOLD in 4m".** Fast polling means a
+  disappearance is detectable within minutes, and how quickly things go is the
+  clearest evidence the detector is finding real bargains.
+
+The feed is force-pushed to a **single-commit orphan branch** (`hot-feed`), so
+publishing every few minutes adds no git history at all. The page fetches it from
+`raw.githubusercontent.com`, which is CDN-cached for a few minutes — the site
+therefore lags reality slightly, which is fine, because the push notification is
+the channel that has to be instant.
+
+Preview the design without running anything live:
+
+```bash
+python -m scripts.preview_site     # writes preview/index.html from real listings
+```
+
 ## Features
 
 - **Customizable brand watchlist** — pick which outdoor brands to track in
@@ -101,17 +128,19 @@ calibrated against real traffic.
 ## How it works
 
 ```
-HOT PATH — every ~60s, notifies, commits nothing
+HOT PATH — every ~60s
   poll newest listings → sample favourites/views → measure rate of gain
-     → compare against the adaptive bar → price veto → push to your phone
+     → adaptive bar → price veto → push to your phone
+     → detect disappearances (sold)
+     → publish JSON feed  → force-push to `hot-feed` (one commit, always)
                                               ↑
                                      baselines table (read-only)
                                               ↑
-COLD PATH — once a day, owns the data and the site
+COLD PATH — once a day, owns the data
   scrape (Vinted API) → store items + price observations (SQLite)
      → recompute per-brand/category median baseline
-     → flag items priced ≥ threshold below baseline
-     → render static site to docs/ → GitHub Pages → commit
+     → fold the poller's alert log + listings into the DB
+     → render the page shell to docs/ → GitHub Pages → commit
 ```
 
 The [`vinted-hot-poller`](.github/workflows/poller.yml) workflow runs the fast
@@ -124,11 +153,14 @@ inherit exactly that unreliability. So cron is used only to *start* a job, which
 then does its own precise timing internally for 5h45m. A new run cancels the
 incumbent, so scheduling delay shifts the handover rather than leaving a gap.
 
-**Why the poller never commits.** `data/vinted.db` is tens of megabytes and
-committed to git. Writing it every 60 seconds is impossible to commit and would
-bloat the repo without bound. The poller keeps a small, disposable state file in
-the Actions cache instead; the daily job folds its alert log into the committed
-DB so dedup survives the cache being evicted.
+**Why the poller never commits the database.** `data/vinted.db` is tens of
+megabytes and committed to git. Writing it every 60 seconds would bloat the repo
+without bound. The poller keeps a small, disposable state file in the Actions
+cache instead; the daily job folds its alert log *and the listings themselves*
+into the committed DB — the latter matters because a listing that appears and
+sells between daily scrapes would otherwise have no title or photo to display.
+
+The only thing the poller pushes is the feed, and only to its own orphan branch.
 
 ## Setup
 
@@ -248,17 +280,21 @@ src/vinted/        client.py (session + fetch), models.py
 src/storage/       schema.sql, db.py
 src/pricing/       baseline.py, deals.py
 src/hot/           hotness.py (velocity maths), thresholds.py (the adaptive bar),
-                   alerts.py (rules), state.py (cache-backed state), poller.py (loop)
+                   alerts.py (rules), sold.py (disappearance detection),
+                   feed.py (the site's data), publish.py (orphan-branch push),
+                   state.py (cache-backed state), poller.py (loop)
 src/notify/        base.py (interface + burst cap), ntfy.py, console.py
-src/site/          generator.py, templates/, static/
+src/site/          generator.py (shell + fallback feed), templates/, static/hot.js
 src/config.py      config loader
 src/run.py         daily orchestrator
-scripts/probe_api.py   verifies the API still returns what the poller needs
+scripts/probe_api.py     verifies the API still returns what the poller needs
+scripts/preview_site.py  renders the site with sample data, for design review
 tests/             pytest suite (no network required)
 data/vinted.db     committed SQLite (source of truth)
 data/hot.db        poller working state — gitignored, lives in the Actions cache
 docs/              generated site (GitHub Pages source)
 .github/workflows/ daily.yml, poller.yml, tests.yml
+(branch `hot-feed`)  the live JSON feed — one commit, force-pushed
 ```
 
 ## Caveats & legal

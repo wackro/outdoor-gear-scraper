@@ -25,12 +25,19 @@ class Observation:
 
 class Database:
     def __init__(self, path: str | Path = DEFAULT_DB_PATH):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        # A `file:...?mode=ro` URI opens the database read-only, which callers
+        # that only want to read (previews, reports) should use: the normal path
+        # runs the additive migration and would rewrite the whole file.
+        uri = isinstance(path, str) and path.startswith("file:")
+        self.path = Path(path) if not uri else Path(str(path).split("?")[0][5:])
+        self.read_only = uri and "mode=ro" in str(path)
+        if not uri:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(path), uri=uri)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self._init_schema()
+        if not self.read_only:
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            self._init_schema()
 
     def _init_schema(self) -> None:
         self.conn.executescript(SCHEMA_PATH.read_text())
@@ -51,6 +58,11 @@ class Database:
         ):
             if col not in have:
                 self.conn.execute(f"ALTER TABLE items ADD COLUMN {col} {decl}")
+
+        have_alerted = {row["name"] for row in self.conn.execute("PRAGMA table_info(alerted)")}
+        for col, decl in (("sold_at", "TEXT"), ("seconds_to_sell", "INTEGER")):
+            if col not in have_alerted:
+                self.conn.execute(f"ALTER TABLE alerted ADD COLUMN {col} {decl}")
 
     def close(self) -> None:
         self.conn.close()
@@ -179,25 +191,61 @@ class Database:
         ).fetchall()
 
     def merge_alerts(self, hot_db_path: str | Path) -> int:
-        """Copy the poller's alert log into the committed DB.
+        """Copy the poller's alert log — and the listings themselves — into the DB.
 
-        The poller keeps its dedup state in a throwaway cache file. Folding it
-        into the repo once a day means a lost cache costs at most a few hours of
-        dedup rather than re-notifying on every listing we already pushed.
+        Two things are folded in, and the second is easy to overlook:
+
+        1. The alert log, so dedup survives the Actions cache being evicted.
+        2. The listing metadata, so every alerted item has a title, photo and URL
+           to render. This matters because `items` is otherwise only populated by
+           the *daily* scrape: a listing that appeared at 14:00 and sold by 14:20
+           would be alerted on and then be unrenderable, and those are precisely
+           the listings this system exists to catch.
+
+        Scraped rows always win over poller rows where both exist — the daily
+        scrape carries `catalog_id` and price history the poller never sees.
         """
         hot_path = Path(hot_db_path)
         if not hot_path.exists():
             return 0
         self.conn.execute("ATTACH DATABASE ? AS hot", (f"file:{hot_path}?mode=ro",))
         try:
+            # Listings first, so the alerted rows below always have something to
+            # join against.
+            self.conn.execute(
+                """
+                INSERT INTO items (id, brand, brand_title, category, gender,
+                                   garment_type, title, price, currency, size,
+                                   condition, url, image_url, first_seen, last_seen,
+                                   active, listed_ts)
+                SELECT m.item_id, m.brand, m.brand_title, m.category, m.gender,
+                       m.garment_type, m.title, m.price, m.currency, m.size,
+                       m.condition, m.url, m.image_url,
+                       strftime('%Y-%m-%dT%H:%M:%S+00:00', m.first_seen, 'unixepoch'),
+                       strftime('%Y-%m-%dT%H:%M:%S+00:00', m.last_seen, 'unixepoch'),
+                       CASE WHEN m.gone_at IS NULL THEN 1 ELSE 0 END,
+                       m.listed_ts
+                FROM hot.item_meta m
+                JOIN hot.alerts a ON a.item_id = m.item_id
+                WHERE true
+                ON CONFLICT(id) DO NOTHING
+                """
+            )
             cur = self.conn.execute(
                 """
                 INSERT INTO alerted (item_id, alerted_at, heat, fav_rate, view_rate,
-                                     price, baseline)
-                SELECT item_id, alerted_at, heat, fav_rate, view_rate, price, baseline
-                FROM hot.alerts
+                                     price, baseline, sold_at, seconds_to_sell)
+                SELECT a.item_id, a.alerted_at, a.heat, a.fav_rate, a.view_rate,
+                       a.price, a.baseline,
+                       strftime('%Y-%m-%dT%H:%M:%S+00:00', m.gone_at, 'unixepoch'),
+                       CAST(m.gone_at - m.listed_ts AS INTEGER)
+                FROM hot.alerts a
+                LEFT JOIN hot.item_meta m ON m.item_id = a.item_id
                 WHERE true
-                ON CONFLICT(item_id) DO NOTHING
+                ON CONFLICT(item_id) DO UPDATE SET
+                    sold_at         = COALESCE(alerted.sold_at, excluded.sold_at),
+                    seconds_to_sell = COALESCE(alerted.seconds_to_sell,
+                                               excluded.seconds_to_sell)
                 """
             )
             merged = cur.rowcount

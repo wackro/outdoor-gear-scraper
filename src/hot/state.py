@@ -26,7 +26,8 @@ DEFAULT_HOT_DB = Path(__file__).resolve().parent.parent.parent / "data" / "hot.d
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS item_meta (
     item_id      INTEGER PRIMARY KEY,
-    brand        TEXT,
+    brand        TEXT,                -- normalized config key, e.g. the_north_face
+    brand_title  TEXT,                -- Vinted's display name, e.g. The North Face
     category     TEXT,
     gender       TEXT,
     garment_type TEXT,
@@ -40,8 +41,10 @@ CREATE TABLE IF NOT EXISTS item_meta (
     promoted     INTEGER NOT NULL DEFAULT 0,
     listed_ts    INTEGER,
     first_seen   REAL NOT NULL,      -- unix seconds, when WE first saw it
-    last_seen    REAL NOT NULL
+    last_seen    REAL NOT NULL,
+    gone_at      REAL                 -- when it vanished from the catalog (sold)
 );
+CREATE INDEX IF NOT EXISTS idx_meta_gone ON item_meta(gone_at);
 
 -- Attention over time. The whole hotness signal is the shape of this table.
 CREATE TABLE IF NOT EXISTS item_samples (
@@ -115,22 +118,25 @@ class HotState:
         """
         self.conn.execute(
             """
-            INSERT INTO item_meta (item_id, brand, category, gender, garment_type,
-                                   title, price, currency, size, condition, url,
-                                   image_url, promoted, listed_ts, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO item_meta (item_id, brand, brand_title, category, gender,
+                                   garment_type, title, price, currency, size,
+                                   condition, url, image_url, promoted, listed_ts,
+                                   first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 price     = excluded.price,
                 size      = excluded.size,
                 condition = excluded.condition,
                 image_url = excluded.image_url,
                 promoted  = excluded.promoted,
-                last_seen = excluded.last_seen
+                last_seen = excluded.last_seen,
+                gone_at   = NULL          -- it's back on the page; it hadn't sold
             """,
             (
-                item.id, brand, category, gender, garment_type, item.title,
-                item.price, item.currency or "GBP", item.size, item.condition,
-                item.url, item.image_url, int(item.promoted), item.listed_ts, now, now,
+                item.id, brand, item.brand_title, category, gender, garment_type,
+                item.title, item.price, item.currency or "GBP", item.size,
+                item.condition, item.url, item.image_url, int(item.promoted),
+                item.listed_ts, now, now,
             ),
         )
         # A repeated poll within the same second is a no-op rather than an error.
@@ -142,6 +148,33 @@ class HotState:
             """,
             (item.id, now, item.favourite_count, item.view_count),
         )
+
+    def tracked_in_category(self, category: str, since: float) -> list:
+        """Live listings we're watching in one category, for sold detection."""
+        from .sold import Tracked
+        rows = self.conn.execute(
+            "SELECT item_id, listed_ts FROM item_meta "
+            "WHERE category = ? AND gone_at IS NULL AND last_seen >= ?",
+            (category, since),
+        ).fetchall()
+        return [Tracked(r["item_id"], r["listed_ts"]) for r in rows]
+
+    def mark_gone(self, item_ids: list[int], now: float) -> int:
+        """Record that these listings have disappeared from the catalog.
+
+        Only sets `gone_at` once — the first disappearance is the sale. Re-marking
+        on every later sweep would keep pushing the timestamp forward and destroy
+        the time-to-sell measurement.
+        """
+        if not item_ids:
+            return 0
+        placeholders = ",".join("?" * len(item_ids))
+        cur = self.conn.execute(
+            f"UPDATE item_meta SET gone_at = ? "
+            f"WHERE gone_at IS NULL AND item_id IN ({placeholders})",
+            [now, *item_ids],
+        )
+        return cur.rowcount
 
     def commit(self) -> None:
         self.conn.commit()
@@ -209,6 +242,10 @@ class HotState:
             """,
             (item_id, _utc_now_iso(), heat, fav_rate, view_rate, price, baseline),
         )
+
+    def alerted_ids(self) -> set[int]:
+        """Every item we've alerted on — one query, for bulk feed rendering."""
+        return {row[0] for row in self.conn.execute("SELECT item_id FROM alerts")}
 
     def alerts_since(self, since_iso: str) -> list[sqlite3.Row]:
         return self.conn.execute(

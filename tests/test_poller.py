@@ -169,3 +169,37 @@ def test_run_summary_reports_what_happened(build):
     summary = poller.stats.as_markdown(poller.bar)
     assert "Vinted poller run" in summary
     assert "Alerts sent" in summary
+
+
+class TestPublishSafety:
+    """Publishing force-pushes a git branch, so the default must be inert.
+
+    An earlier version defaulted `dry_run` to False and set it afterwards from
+    `build_poller`, which meant this very test file pushed a branch to the real
+    remote the first time it ran.
+    """
+
+    def test_a_default_poller_never_publishes(self, build):
+        poller, _, _ = build([[make_item(1, 0)]])
+        assert poller.dry_run is True
+
+    def test_publishing_is_skipped_in_dry_run(self, build, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            "src.hot.poller.publish_feed",
+            lambda *a, **k: called.append(k) or False,
+        )
+        poller, _, _ = build([[make_item(1, 0)]])
+        poller.run(once=True)
+        # publish_feed is still called, but always with dry_run set, so it
+        # short-circuits before touching git.
+        assert all(kwargs.get("dry_run") for kwargs in called)
+
+    def test_feed_can_be_disabled_entirely(self, build, monkeypatch):
+        called = []
+        monkeypatch.setattr("src.hot.poller.publish_feed",
+                            lambda *a, **k: called.append(1) or False)
+        poller, _, _ = build([[make_item(1, 0)]])
+        object.__setattr__(poller.config.poll, "feed_enabled", False)
+        poller.run(once=True)
+        assert called == []

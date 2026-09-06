@@ -124,7 +124,12 @@ def main() -> int:
             total, stale, pruned, deal_count, merged,
         )
 
-        render_site(db, currency=config.currency)
+        render_site(
+            db, currency=config.currency,
+            feed_url=config.site.feed_url,
+            feed_branch=config.poll.feed_branch,
+            refresh_sec=config.site.refresh_sec,
+        )
         log.info("Site rendered to docs/.")
 
     return 0

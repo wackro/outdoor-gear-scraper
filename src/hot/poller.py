@@ -31,6 +31,9 @@ from ..vinted.brand_resolver import BrandResolution, resolve_brands
 from ..vinted.category_resolver import resolve_category_ids
 from ..vinted.client import VintedBlocked, VintedClient, VintedError, _norm
 from .alerts import BaselineLookup, evaluate, population_rates
+from .feed import build_feed, feed_changed
+from .publish import publish_feed
+from .sold import detect_gone
 from .state import DEFAULT_HOT_DB, HotState
 from .thresholds import Bar, build_bar
 
@@ -46,6 +49,8 @@ class Stats:
     items_seen: int = 0
     items_tracked: int = 0
     alerts_sent: int = 0
+    sold_seen: int = 0
+    feeds_published: int = 0
     blocks: int = 0
     errors: int = 0
 
@@ -62,6 +67,8 @@ class Stats:
             f"| Listings seen | {self.items_seen} |",
             f"| Listings tracked | {self.items_tracked} |",
             f"| **Alerts sent** | **{self.alerts_sent}** |",
+            f"| Listings sold while watched | {self.sold_seen} |",
+            f"| Feed publishes | {self.feeds_published} |",
             f"| Blocked/rate-limited | {self.blocks} |",
             f"| Errors | {self.errors} |",
             f"| Alert bar | {bar.fav_cut * 60:.1f} likes/hr "
@@ -78,7 +85,13 @@ class Poller:
         notifier: Notifier,
         brands: BrandResolution,
         category_ids: dict[str, int],
+        *,
+        dry_run: bool = True,
     ):
+        # Defaults to True on purpose. Publishing the feed force-pushes a git
+        # branch, so the unsafe direction has to be the one you opt into: any
+        # caller that forgets to decide -- a test, a REPL, a future entry point --
+        # gets the harmless behaviour rather than pushing to a real remote.
         self.config = config
         self.state = state
         self.client = client
@@ -104,6 +117,10 @@ class Poller:
         self._last_session_refresh = time.time()
         self._last_bar_refresh = 0.0
         self._last_prune = time.time()
+        self._last_feed_publish = 0.0
+        self._last_feed: dict | None = None
+        self.repo_dir = Path(__file__).resolve().parent.parent.parent
+        self.dry_run = dry_run
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -232,8 +249,31 @@ class Poller:
                     gender=category.gender, garment_type=category.type, now=now,
                 )
                 self.stats.items_tracked += 1
+
+            self._detect_sales(category.name, items, now)
             self.client.throttle()
         self.state.commit()
+
+    def _detect_sales(self, category: str, items: list, now: float) -> None:
+        """Mark listings that should have been on this page but weren't.
+
+        Only meaningful because we poll fast enough for absence to mean something.
+        See `src/hot/sold.py` for why this is not simply "wasn't in the response".
+        """
+        tracked = self.state.tracked_in_category(
+            category, now - self.config.alerts.max_age_minutes * 60
+        )
+        if not tracked:
+            return
+        gone = detect_gone(
+            tracked,
+            {item.id for item in items},
+            [item.listed_ts for item in items if item.listed_ts],
+        )
+        marked = self.state.mark_gone(gone, now)
+        if marked:
+            self.stats.sold_seen += marked
+            log.info("%s: %d listing(s) gone (likely sold).", category, marked)
 
     def _enter_cooldown(self) -> None:
         """Back off hard after a block, doubling each time.
@@ -296,11 +336,39 @@ class Poller:
             self._refresh_bar(now)
 
         self._dispatch(now)
+        self._publish_feed(now)
 
         if now - self._last_prune > 1800:
             samples, alerts = self.state.prune(now=now)
             self._last_prune = now
             log.debug("Pruned %d samples, %d stale alerts.", samples, alerts)
+
+    def _publish_feed(self, now: float) -> None:
+        """Refresh the website's data, if anything worth showing has changed.
+
+        Debounced and change-gated: the rates wobble slightly every cycle, and
+        without both guards this would push a commit every single minute.
+        Failures are swallowed — losing a site refresh must never stop the
+        polling, which is the part that actually notifies you.
+        """
+        poll = self.config.poll
+        if not poll.feed_enabled:
+            return
+        if now - self._last_feed_publish < poll.feed_publish_interval_sec:
+            return
+        try:
+            feed = build_feed(self.state, self.config, self.bar, self.baselines,
+                              now=now, limit=poll.feed_limit)
+            if not feed_changed(self._last_feed, feed):
+                self._last_feed_publish = now
+                return
+            if publish_feed(feed, branch=poll.feed_branch, repo_dir=self.repo_dir,
+                            dry_run=self.dry_run):
+                self.stats.feeds_published += 1
+            self._last_feed = feed
+            self._last_feed_publish = now
+        except Exception:  # noqa: BLE001 — the loop outranks the website
+            log.exception("Feed publish failed")
 
     def run(self, *, once: bool = False, max_runtime: float | None = None) -> int:
         deadline = time.time() + (max_runtime or self.config.poll.max_runtime_sec)
@@ -390,6 +458,7 @@ def build_poller(config: Config, *, dry_run: bool, hot_db: Path) -> Poller:
         notifier=build_notifier(config, dry_run=dry_run),
         brands=brands,
         category_ids=category_ids,
+        dry_run=dry_run,        # also suppresses pushing the site feed
     )
     poller.load_baselines()
     return poller

@@ -69,6 +69,12 @@ class PollConfig:
     circuit_breaker_failures: int = 8
     night: NightBackoff = field(default_factory=NightBackoff)
 
+    # -- the website feed --
+    feed_enabled: bool = True
+    feed_branch: str = "hot-feed"       # force-pushed, single commit, no history
+    feed_publish_interval_sec: float = 300.0
+    feed_limit: int = 120
+
 
 @dataclass(frozen=True)
 class AlertsConfig:
@@ -104,6 +110,14 @@ GARMENT_TYPES = ("clothes", "trousers", "shoes", "bags")
 
 
 @dataclass(frozen=True)
+class SiteConfig:
+    """Where the published page looks for its live data."""
+    # Left blank, the generator derives it from $GITHUB_REPOSITORY at render time.
+    feed_url: str = ""
+    refresh_sec: int = 60
+
+
+@dataclass(frozen=True)
 class Category:
     name: str          # unique key, e.g. "men_jackets"
     gender: str        # "men" | "women"
@@ -120,6 +134,7 @@ class Config:
     deals: DealsConfig
     poll: PollConfig
     alerts: AlertsConfig
+    site: SiteConfig
     categories: list[Category]
     brands: list[Brand]
     sizes: dict[str, dict[str, list[str]]]  # gender -> type -> allowed size tokens
@@ -212,6 +227,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         deals=DealsConfig(**(raw.get("deals") or {})),
         poll=_poll_config(raw.get("poll") or {}),
         alerts=AlertsConfig(**(raw.get("alerts") or {})),
+        site=SiteConfig(**(raw.get("site") or {})),
         categories=categories,
         brands=brands,
         sizes=sizes,

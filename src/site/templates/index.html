@@ -1,9 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
+
+{#
+  No cards are rendered server-side. The page is a shell that fetches the live
+  feed the poller publishes, because anything baked in at build time would be
+  hours stale by the time you read it -- and these listings sell within the hour.
+#}
+{#
+  The feed inlined at build time. Lets the page paint immediately instead of
+  showing a spinner while a request goes out, and means it still works opened
+  straight off disk. Live data replaces it as soon as the fetch returns.
+#}
+<script type="application/json" id="feed-bootstrap">{{ bootstrap_feed|safe }}</script>
+
+<section class="status" id="status" data-feed-url="{{ feed_url }}" data-refresh="{{ refresh_sec }}">
+  <span class="status-dot" id="status-dot"></span>
+  <span id="status-text">Loading the latest listings…</span>
+</section>
+
+<section class="stats" id="stats" hidden>
+  <div class="stat">
+    <span class="stat-value" id="stat-tracked">–</span>
+    <span class="stat-label">watching</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-hot" id="stat-alerted">–</span>
+    <span class="stat-label">alerted</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="stat-sold">–</span>
+    <span class="stat-label">sold</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="stat-median">–</span>
+    <span class="stat-label">med. sale time</span>
+  </div>
+  {# The live alert bar. Shown so you can judge whether it's set sensibly:
+     if the flagged listings look right and the top unflagged ones don't,
+     it's about right. #}
+  <div class="stat stat-bar">
+    <span class="stat-value" id="stat-bar">–</span>
+    <span class="stat-label" id="stat-bar-label">alert bar</span>
+  </div>
+</section>
+
 <section class="tabs" role="tablist">
   {% for value, label in sections %}
   <button class="tab{% if value == 'men' %} is-active{% endif %}" data-section="{{ value }}" role="tab">
-    {{ label }} <span class="tab-count">{{ counts[value] }}</span>
+    {{ label }} <span class="tab-count" data-count-for="{{ value }}">0</span>
   </button>
   {% endfor %}
 </section>
@@ -12,50 +56,41 @@
   <div class="control">
     <label for="sort">Sort by</label>
     <select id="sort">
-      <option value="hot">Hot (fresh + discount)</option>
+      <option value="heat">Hottest</option>
+      <option value="likes">Likes per hour</option>
+      <option value="recent">Just listed</option>
       <option value="discount">Biggest discount</option>
-      <option value="recent">Most recent</option>
-      <option value="score">Deal score</option>
       <option value="price-asc">Price: low to high</option>
       <option value="price-desc">Price: high to low</option>
     </select>
   </div>
   <div class="control">
     <label for="brand">Brand</label>
-    <select id="brand">
-      <option value="">All brands</option>
-      {% for value, label in brand_filters %}
-      <option value="{{ value }}">{{ label }}</option>
-      {% endfor %}
-    </select>
+    <select id="brand"><option value="">All brands</option></select>
   </div>
   <div class="control">
     <label for="type">Type</label>
-    <select id="type">
-      <option value="">All types</option>
-      {% for value, label in type_filters %}
-      <option value="{{ value }}">{{ label }}</option>
-      {% endfor %}
-    </select>
+    <select id="type"><option value="">All types</option></select>
   </div>
-  <p class="count"><span id="visible-count">0</span> deals</p>
+  <div class="control control-check">
+    <label for="hide-sold">
+      <input type="checkbox" id="hide-sold"> Hide sold
+    </label>
+  </div>
+  <p class="count"><span id="visible-count">0</span> listings</p>
 </section>
 
-{% if deals %}
-<section id="deals" class="deal-grid">
-  {% for deal in deals %}
-  {% include "_card.html" %}
-  {% endfor %}
-</section>
-<p id="empty-state" class="empty" hidden>No deals match those filters.</p>
-{% else %}
-<section class="empty">
-  <p><strong>No deals yet.</strong></p>
+<section id="feed" class="deal-grid"></section>
+
+<p id="empty-state" class="empty" hidden>Nothing matches those filters.</p>
+
+<section id="cold-start" class="empty" hidden>
+  <p><strong>Nothing hot right now.</strong></p>
   <p>
-    Deals are judged against each brand's recent price history and filtered to
-    your chosen sizes and a minimum condition. The first scrape populates this
-    within a day.
+    The poller is watching, but no listing has gained attention fast enough to
+    show up yet. Quiet spells are normal — a genuine bargain is a rare event, and
+    a feed that always had something in it would mean the bar was set too low.
   </p>
 </section>
-{% endif %}
+
 {% endblock %}

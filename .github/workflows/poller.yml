@@ -25,7 +25,10 @@ concurrency:
   cancel-in-progress: true    # newest run wins; handover, never a pile-up
 
 permissions:
-  contents: read              # the poller never writes to the repo
+  # Needed to force-push the site's data feed to its own branch. The poller
+  # never writes to the default branch or to data/ -- see src/hot/publish.py,
+  # which builds the commit with git plumbing and updates only that one ref.
+  contents: write
 
 jobs:
   poll:
@@ -57,6 +60,11 @@ jobs:
           key: hot-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             hot-state-
+
+      - name: Configure git for feed pushes
+        run: |
+          git config user.name "deals-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Poll
         env:
