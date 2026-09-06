@@ -12,8 +12,10 @@ site degrades to "here's what we caught recently" rather than to an error.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +26,8 @@ from ..storage.db import Database
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
+
+log = logging.getLogger(__name__)
 
 CURRENCY_SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$"}
 TYPE_LABELS = {"clothes": "Clothes", "trousers": "Trousers", "shoes": "Shoes", "bags": "Bags"}
@@ -62,20 +66,27 @@ def build_fallback_feed(db: Database, *, limit: int = 120) -> dict:
     Deliberately the same shape as the poller's live feed, so the page needs no
     special case: it renders whichever it gets.
     """
-    rows = db.conn.execute(
-        """
-        SELECT a.item_id, a.alerted_at, a.heat, a.fav_rate, a.view_rate,
-               a.price, a.baseline, a.sold_at, a.seconds_to_sell,
-               i.title, i.brand, i.brand_title, i.gender, i.garment_type,
-               i.size, i.condition, i.url, i.image_url, i.currency,
-               i.favourite_count, i.view_count, i.listed_ts, i.active
-        FROM alerted a
-        JOIN items i ON i.id = a.item_id
-        ORDER BY a.alerted_at DESC
-        LIMIT ?
-        """,
-        (limit,),
-    ).fetchall()
+    try:
+        rows = db.conn.execute(
+            """
+            SELECT a.item_id, a.alerted_at, a.heat, a.fav_rate, a.view_rate,
+                   a.price, a.baseline, a.sold_at, a.seconds_to_sell,
+                   i.title, i.brand, i.brand_title, i.gender, i.garment_type,
+                   i.size, i.condition, i.url, i.image_url, i.currency,
+                   i.favourite_count, i.view_count, i.listed_ts, i.active
+            FROM alerted a
+            JOIN items i ON i.id = a.item_id
+            ORDER BY a.alerted_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        # A database predating the alert tables (or opened read-only, so the
+        # migration never ran) should still produce a page. An empty fallback is
+        # correct here anyway: the live feed is what the page actually shows.
+        log.warning("No alert history available for the fallback feed: %s", exc)
+        rows = []
 
     now = datetime.now(timezone.utc)
     items = []

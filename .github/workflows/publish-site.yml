@@ -1,0 +1,72 @@
+name: publish-site
+
+# Rebuilds and deploys the page. Deliberately separate from scraping: the page
+# shell is code, so a change to it should reach the site in about a minute,
+# whereas scraping is slow, network-bound and rate-limited. Tying the two
+# together meant a template tweak could only go live once a day, on the back of
+# a Vinted scrape it didn't need.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/site/**'
+      - '.github/workflows/publish-site.yml'
+  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Commit or branch to render from. Callers that have just pushed a new
+          commit must pass `main`: a called workflow otherwise checks out the
+          commit that *triggered* the run, which is the state before their push,
+          and the site would be built from the previous database.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pages: write            # deploy to Pages
+  id-token: write         # OIDC token the deploy action authenticates with
+
+# Pages allows one deployment at a time, and both this and the daily job can
+# reach here. Queue rather than cancel, so a scrape's deploy is never discarded.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}      # empty = the triggering commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Renders from the committed database. No network, no Vinted request.
+      - name: Render site
+        run: python -m src.run --render-only
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true            # switches Pages to Actions if it isn't already
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4
