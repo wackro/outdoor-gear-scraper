@@ -48,15 +48,26 @@ class Stats:
     requests: int = 0
     items_seen: int = 0
     items_tracked: int = 0
+    # Whether Vinted actually returns the counter the whole hot path depends on.
+    # Surfaced in the run summary because it is the one assumption that cannot be
+    # checked without hitting the live API.
+    items_with_likes: int = 0
     alerts_sent: int = 0
     sold_seen: int = 0
     feeds_published: int = 0
     blocks: int = 0
     errors: int = 0
 
-    def as_markdown(self, bar: Bar) -> str:
+    def as_markdown(self, bar: Bar, *, channel: str = "") -> str:
         mins = (time.time() - self.started) / 60
-        return "\n".join([
+        if self.items_tracked == 0:
+            likes = "no listings tracked yet"
+        elif self.items_with_likes == 0:
+            likes = (f"**0 of {self.items_tracked}** — `favourite_count` is absent "
+                     f"from the API response, so nothing can ever look hot")
+        else:
+            likes = f"{self.items_with_likes} of {self.items_tracked}"
+        lines = [
             "## Vinted poller run",
             "",
             f"| Metric | Value |",
@@ -66,6 +77,7 @@ class Stats:
             f"| Requests | {self.requests} |",
             f"| Listings seen | {self.items_seen} |",
             f"| Listings tracked | {self.items_tracked} |",
+            f"| Listings with like counts | {likes} |",
             f"| **Alerts sent** | **{self.alerts_sent}** |",
             f"| Listings sold while watched | {self.sold_seen} |",
             f"| Feed publishes | {self.feeds_published} |",
@@ -73,7 +85,17 @@ class Stats:
             f"| Errors | {self.errors} |",
             f"| Alert bar | {bar.fav_cut * 60:.1f} likes/hr "
             f"({'adaptive' if bar.adaptive else 'floor'}, n={bar.sample_size}) |",
-        ])
+        ]
+        if channel == "console":
+            # Otherwise a run that finds things but sends nothing reads as a
+            # broken notifier rather than a deliberate setting.
+            lines += [
+                "",
+                "> Alerts are going to this log, not to a phone "
+                "(`alerts.channel: console`). Set `alerts.ntfy_topic` and switch "
+                "`channel` to `ntfy` to receive them.",
+            ]
+        return "\n".join(lines)
 
 
 class Poller:
@@ -249,6 +271,8 @@ class Poller:
                     gender=category.gender, garment_type=category.type, now=now,
                 )
                 self.stats.items_tracked += 1
+                if item.favourite_count is not None:
+                    self.stats.items_with_likes += 1
 
             self._detect_sales(category.name, items, now)
             self.client.throttle()
@@ -432,7 +456,7 @@ class Poller:
 
     def _finish(self) -> None:
         self.state.commit()
-        summary = self.stats.as_markdown(self.bar)
+        summary = self.stats.as_markdown(self.bar, channel=self.config.alerts.channel)
         log.info("\n%s", summary)
         step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if step_summary:

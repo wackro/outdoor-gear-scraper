@@ -50,17 +50,32 @@ straight to the listing.
 > moving, not first-mover advantage. Polling fast and measuring over a listing's
 > first minutes keeps the lag as short as it can be.
 
-### Setting up alerts
+### Turning alerts on
+
+**Alerts ship switched off** (`alerts.channel: console`). The poller still does
+everything else for real — polls, scores, detects sales, publishes the site feed —
+but writes what it would have sent to the workflow log. That way you can watch
+what it finds for a day and judge the threshold before it starts buzzing your
+pocket.
+
+To go live:
 
 1. Install the ntfy app ([iOS](https://apps.apple.com/us/app/ntfy/id1625396347) /
    [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)).
-2. Pick a topic name and set it as `alerts.ntfy_topic` in `config/config.yaml`.
-   **Make it unguessable** — topics on the public server are readable by anyone
-   who knows the name.
+2. In `config/config.yaml`, set `alerts.ntfy_topic` to something unguessable and
+   change `alerts.channel` to `ntfy`. **Unguessable matters** — topics on the
+   public server are readable by anyone who knows the name.
 3. Subscribe to that topic in the app.
 4. Optionally add an `NTFY_TOKEN` repo secret. Worth doing: it moves rate
    limiting from the shared GitHub runner IP to your own account.
-5. Enable the `vinted-hot-poller` workflow.
+
+### Is it actually working?
+
+Every poller run writes a summary to the workflow's job page. The row to check is
+**Listings with like counts**: hotness is entirely derived from Vinted's
+`favourite_count`, and if that reads `0 of N` then the field isn't in the API
+response and nothing will ever be flagged, however long it runs. `Blocked/rate-
+limited` climbing means DataDome has noticed; see the anti-blocking notes below.
 
 Try it without pushing anything first:
 

@@ -70,8 +70,12 @@ site:
 # Hotness is the trigger; price is only a veto. See src/hot/alerts.py.
 alerts:
   enabled: true
-  channel: ntfy              # ntfy | console
-  ntfy_topic: ""             # REQUIRED: pick something unguessable, it is public
+  # Soft launch: the poller runs for real -- polling, scoring, detecting sales
+  # and publishing the site feed -- but writes alerts to the Actions log instead
+  # of pushing them. TO GO LIVE ON YOUR PHONE: set ntfy_topic below to something
+  # unguessable, then change this to `ntfy`. Nothing else needs touching.
+  channel: console           # ntfy | console
+  ntfy_topic: ""             # required once channel is `ntfy`; it is public
   ntfy_server: https://ntfy.sh
   burst_cap_per_hour: 10     # hard ceiling, so a bug can't send 500 pushes
 

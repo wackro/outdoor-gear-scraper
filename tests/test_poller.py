@@ -203,3 +203,53 @@ class TestPublishSafety:
         object.__setattr__(poller.config.poll, "feed_enabled", False)
         poller.run(once=True)
         assert called == []
+
+
+class TestSoftLaunch:
+    """The shipped config runs the poller with alerts going to the log.
+
+    Pinned down so the state is deliberate: `channel: console` skips the
+    empty-topic guard, which would otherwise stop the poller starting at all.
+    """
+
+    def test_shipped_config_starts_without_an_ntfy_topic(self):
+        from src.config import load_config
+        from src.notify import build_notifier
+        from src.notify.console import ConsoleNotifier
+
+        config = load_config("config/config.yaml")
+        assert config.alerts.channel == "console"
+        assert build_notifier(config).inner.__class__ is ConsoleNotifier
+
+    def test_example_config_still_documents_the_live_setup(self):
+        from src.config import load_config
+        assert load_config("config/config.example.yaml").alerts.channel == "ntfy"
+
+
+class TestRunSummary:
+    def test_flags_a_missing_favourite_count(self, build):
+        # The one assumption that can't be checked without the live API, so the
+        # run summary has to answer it where the user can read it.
+        from src.vinted.models import VintedItem
+        no_likes = VintedItem(
+            id=1, title="t", price=10.0, currency="GBP", brand_title="Rab",
+            size="M", condition="Good", url="u", image_url="i",
+            favourite_count=None, listed_ts=1,
+        )
+        poller, _, _ = build([[no_likes]])
+        poller.run(once=True)
+        summary = poller.stats.as_markdown(poller.bar)
+        assert "`favourite_count` is absent" in summary
+
+    def test_counts_listings_that_do_have_likes(self, build):
+        poller, _, _ = build([[make_item(1, 5)]])
+        poller.run(once=True)
+        assert poller.stats.items_with_likes == 1
+        assert "1 of 1" in poller.stats.as_markdown(poller.bar)
+
+    def test_console_channel_is_called_out(self, build):
+        poller, _, _ = build([[make_item(1, 5)]])
+        summary = poller.stats.as_markdown(poller.bar, channel="console")
+        assert "not to a phone" in summary
+        assert "not to a phone" not in poller.stats.as_markdown(
+            poller.bar, channel="ntfy")
