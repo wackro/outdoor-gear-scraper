@@ -61,8 +61,11 @@ poll:
 
 # --- website --------------------------------------------------------------
 site:
-  # Where the page fetches its live feed. Left blank, it's derived from
-  # $GITHUB_REPOSITORY at render time, which is right for GitHub Actions.
+  # SET THIS to your own repo's raw feed URL:
+  #   https://raw.githubusercontent.com/<owner>/<repo>/hot-feed/hot.json
+  # Left blank it is derived from $GITHUB_REPOSITORY, which only works when the
+  # page is rendered inside Actions -- a local render silently produces a
+  # relative path pointing at the empty build-time fallback instead.
   feed_url: ""
   refresh_sec: 60
 
