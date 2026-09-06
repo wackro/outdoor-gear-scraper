@@ -16,6 +16,16 @@ class VintedItem:
     url: str
     image_url: str
 
+    # -- attention signals (the "hotness" inputs) ---------------------------
+    # Vinted omits these for some listings, so they are genuinely optional and
+    # must never be coerced to 0 — "nobody has liked this" and "we don't know
+    # how many people have liked this" are different facts, and treating the
+    # second as the first would silently suppress alerts.
+    favourite_count: int | None = None
+    view_count: int | None = None
+    promoted: bool = False          # paid boost; inflates views, scored separately
+    listed_ts: int | None = None    # unix seconds; when the listing went up
+
     @classmethod
     def from_json(cls, raw: dict, *, base_url: str) -> "VintedItem | None":
         """Build an item from a raw catalog entry.
@@ -46,6 +56,10 @@ class VintedItem:
             condition=str(raw.get("status") or "").strip(),
             url=url,
             image_url=_extract_photo(raw.get("photo")),
+            favourite_count=_extract_count(raw.get("favourite_count")),
+            view_count=_extract_count(raw.get("view_count")),
+            promoted=bool(raw.get("promoted")),
+            listed_ts=_extract_listed_ts(raw.get("photo")),
         )
 
 
@@ -76,3 +90,38 @@ def _extract_photo(photo_field) -> str:
     if isinstance(photo_field, dict):
         return str(photo_field.get("full_size_url") or photo_field.get("url") or "")
     return ""
+
+
+def _extract_count(value) -> int | None:
+    """Read an attention counter, preserving 'unknown' as None.
+
+    Negative values are treated as unknown rather than clamped: a negative like
+    count is nonsense, and silently turning it into 0 would feed a bogus sample
+    into the velocity maths.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
+
+
+def _extract_listed_ts(photo_field) -> int | None:
+    """When the listing went up, via its main photo's upload timestamp.
+
+    Vinted's catalog response carries no explicit listing time, but the photo is
+    uploaded as part of creating the listing, so its timestamp is the closest
+    proxy available without a per-item request.
+    """
+    if not isinstance(photo_field, dict):
+        return None
+    high_res = photo_field.get("high_resolution")
+    if not isinstance(high_res, dict):
+        return None
+    try:
+        timestamp = int(high_res["timestamp"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return timestamp if timestamp > 0 else None

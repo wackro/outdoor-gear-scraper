@@ -27,6 +27,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Read-only: the daily job merges the poller's alert log into the
+      # committed DB so alert dedup survives the cache being evicted.
+      - name: Restore poller state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/hot.db
+            data/hot.db-wal
+            data/hot.db-shm
+          key: hot-state-
+          restore-keys: |
+            hot-state-
+
       - name: Scrape and build site
         id: run
         env:

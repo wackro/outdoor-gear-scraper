@@ -19,6 +19,7 @@ from .pricing.baseline import (
 )
 from .pricing.deals import detect_deals
 from .site.generator import render_site
+from .hot.state import DEFAULT_HOT_DB
 from .storage.db import Database
 from .vinted.brand_resolver import BrandResolution, resolve_brands
 from .vinted.category_resolver import resolve_category_ids
@@ -112,13 +113,23 @@ def main() -> int:
         stale = db.mark_stale_items(config.deals.stale_days)
         pruned = db.prune_observations(config.deals.window_days)
         deal_count = rebuild_deals(config, db)
+        # Fold the fast poller's alert log into the committed DB. Its own state
+        # lives in a throwaway cache, so this is what makes dedup survive a cache
+        # miss instead of re-notifying on everything still listed.
+        merged = db.merge_alerts(DEFAULT_HOT_DB)
         db.commit()
         log.info(
-            "Stored %d items, marked %d stale, pruned %d observations, flagged %d deals.",
-            total, stale, pruned, deal_count,
+            "Stored %d items, marked %d stale, pruned %d observations, "
+            "flagged %d deals, merged %d alerts.",
+            total, stale, pruned, deal_count, merged,
         )
 
-        render_site(db, currency=config.currency)
+        render_site(
+            db, currency=config.currency,
+            feed_url=config.site.feed_url,
+            feed_branch=config.poll.feed_branch,
+            refresh_sec=config.site.refresh_sec,
+        )
         log.info("Site rendered to docs/.")
 
     return 0

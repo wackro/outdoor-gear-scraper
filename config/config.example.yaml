@@ -33,6 +33,69 @@ sizes:
     trousers: [8, 10]
     shoes:    [5]
 
+# --- fast poller -----------------------------------------------------------
+# Pacing for `python -m src.hot.poller`. Each cycle sweeps a rotating slice of
+# categories, so every category is revisited every few minutes — which is also
+# the interval a favourite-count delta needs in order to be measurable.
+poll:
+  interval_sec: 60           # seconds between cycles
+  deep_pages: 2              # categories swept per cycle (2 of 14 -> ~7min full rotation)
+  jitter: 0.2                # +/- fraction, so requests aren't a metronome
+  session_refresh_min: 30    # re-bootstrap Vinted cookies this often
+  threshold_refresh_sec: 600
+  max_runtime_sec: 20700     # 5h45m — exit cleanly before the 6h Actions limit
+  cooldown_base_sec: 60      # backoff after a 429/403, doubling each time
+  cooldown_max_sec: 900
+  circuit_breaker_failures: 8
+  night:                     # UK listing volume collapses overnight
+    start_hour: 1            # UTC
+    end_hour: 6
+    multiplier: 4
+
+  # The website's live data. Published to a force-pushed single-commit branch so
+  # the repo gains no history, however long the poller runs.
+  feed_enabled: true
+  feed_branch: hot-feed
+  feed_publish_interval_sec: 300
+  feed_limit: 120
+
+# --- website --------------------------------------------------------------
+site:
+  # Where the page fetches its live feed. Left blank, it's derived from
+  # $GITHUB_REPOSITORY at render time, which is right for GitHub Actions.
+  feed_url: ""
+  refresh_sec: 60
+
+# --- instant alerts --------------------------------------------------------
+# Hotness is the trigger; price is only a veto. See src/hot/alerts.py.
+alerts:
+  enabled: true
+  channel: ntfy              # ntfy | console
+  ntfy_topic: ""             # REQUIRED: pick something unguessable, it is public
+  ntfy_server: https://ntfy.sh
+  burst_cap_per_hour: 10     # hard ceiling, so a bug can't send 500 pushes
+
+  # What counts as hot. The bar is the higher of the floor and a percentile of
+  # what listings are currently achieving, so it adapts without retuning.
+  velocity_window_min: 30
+  floor_favourites_per_hour: 4
+  min_favourites_gain: 3     # raw likes needed — one like over a short span
+                             # implies a huge hourly rate, so rates alone aren't enough
+  percentile: 99
+  min_population: 200        # below this, the floor alone decides
+  fav_weight: 0.7            # likes: strong intent, arrive later
+  view_weight: 0.3           # views: weaker signal, but arrive earlier
+
+  # Which listings are eligible at all.
+  min_age_minutes: 3         # younger than this and the rate maths is meaningless
+  max_age_minutes: 180       # older than this and the window has closed
+  population_max_age_min: 60
+  allow_bootstrap: false     # act on single-sighting estimates? main false-alarm source
+
+  # Price veto — never the trigger, only a way to reject "popular at a fair price".
+  sanity_discount: 0.10
+  max_price: 400
+
 # Categories to scrape, resolved to catalog ids by name within their gender
 # department. `type: bags` items appear in a unisex "Bags" tab and skip size
 # filtering. (ids are fallbacks if resolution ever fails.)

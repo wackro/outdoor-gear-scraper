@@ -51,6 +51,17 @@ class VintedError(RuntimeError):
     """Raised when the catalog cannot be fetched after retries."""
 
 
+class VintedBlocked(VintedError):
+    """Raised when Vinted rate-limited or challenged us, rather than failing.
+
+    Distinct from a generic error because the right response is different: a
+    transient network blip should be retried promptly, but a 429 or a DataDome
+    challenge means backing off hard. Callers must be able to tell them apart
+    without pattern-matching on an error string — the message includes the query
+    params, and a brand id containing "403" would otherwise look like a block.
+    """
+
+
 class VintedClient:
     def __init__(self, config: Config):
         self.config = config
@@ -87,6 +98,7 @@ class VintedClient:
         headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
 
         last_error: Exception | None = None
+        blocked = False
         for attempt in range(1, self.config.scrape.max_retries + 1):
             try:
                 session = self._ensure_session()  # may (re-)bootstrap
@@ -105,8 +117,10 @@ class VintedClient:
                     # Session likely expired or was challenged — rebuild and retry.
                     log.warning("HTTP %d; re-bootstrapping session.", resp.status_code)
                     self._session = None
+                    blocked = resp.status_code == 403
                     last_error = VintedError(f"HTTP {resp.status_code}")
                 elif resp.status_code == 429:
+                    blocked = True
                     last_error = VintedError("HTTP 429 (rate limited)")
                     log.warning("Rate limited (attempt %d).", attempt)
                 elif resp.status_code >= 400:
@@ -121,7 +135,8 @@ class VintedClient:
             if attempt < self.config.scrape.max_retries:
                 time.sleep(2 ** attempt)  # exponential backoff: 2s, 4s, ...
 
-        raise VintedError(f"Request failed (params={params}): {last_error}")
+        error_type = VintedBlocked if blocked else VintedError
+        raise error_type(f"Request failed (params={params}): {last_error}")
 
     def _get_page(self, brand_ids: str, catalog_id: int, page: int) -> list[dict]:
         return self._request(
@@ -184,6 +199,18 @@ class VintedClient:
             nodes.append((int(m.group(1)), m.group(2), department_for(m.start())))
         return nodes
 
+    def _parse(self, raw_items: list[dict]) -> list[VintedItem]:
+        """Turn raw catalog entries into items, skipping anything unusable."""
+        items: list[VintedItem] = []
+        for raw in raw_items:
+            item = VintedItem.from_json(raw, base_url=self.base_url)
+            if item is None:
+                continue
+            if item.currency and item.currency != self.config.currency:
+                continue  # ignore listings priced in another currency
+            items.append(item)
+        return items
+
     def fetch_items(self, brand_ids: list[int], catalog_id: int) -> list[VintedItem]:
         """Fetch newest items for a set of brands within a category.
 
@@ -197,17 +224,32 @@ class VintedClient:
             raw_items = self._get_page(brand_ids_param, catalog_id, page)
             if not raw_items:
                 break
-            for raw in raw_items:
-                item = VintedItem.from_json(raw, base_url=self.base_url)
-                if item is None:
-                    continue
-                if item.currency and item.currency != self.config.currency:
-                    continue  # ignore listings priced in another currency
-                items.append(item)
+            items.extend(self._parse(raw_items))
             if len(raw_items) < self.config.scrape.per_page:
                 break  # last page
             self.throttle()
         return items
+
+    def fetch_page(
+        self, brand_ids: list[int], catalog_id: int, page: int = 1
+    ) -> list[VintedItem]:
+        """Fetch exactly one page — the hot path's unit of work.
+
+        The daily scrape walks several pages per category to build price history.
+        The poller instead wants a single cheap read it can repeat every minute,
+        so it controls pagination itself rather than inheriting `max_pages_per_query`.
+        """
+        brand_ids_param = ",".join(str(b) for b in brand_ids)
+        return self._parse(self._get_page(brand_ids_param, catalog_id, page))
+
+    def reset_session(self) -> None:
+        """Drop the current session so the next request bootstraps a fresh one.
+
+        Long-running polling accumulates a stale cookie jar and a session that has
+        been talking to DataDome for hours; periodically starting over looks far
+        more like a normal browser than one immortal session.
+        """
+        self._session = None
 
     def throttle(self) -> None:
         """Sleep a randomised, polite delay (between pages and between queries)."""

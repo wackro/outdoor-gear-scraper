@@ -42,8 +42,79 @@ class DealsConfig:
     stale_days: int = 5
 
 
+@dataclass(frozen=True)
+class NightBackoff:
+    """Poll less often when almost nothing is being listed.
+
+    UK listing volume collapses overnight, so polling at the daytime rate then
+    spends requests against a DataDome-protected endpoint to discover nothing.
+    """
+    start_hour: int = 1        # UTC, inclusive
+    end_hour: int = 6          # UTC, exclusive
+    multiplier: float = 4.0
+
+
+@dataclass(frozen=True)
+class PollConfig:
+    """Pacing for the fast poller."""
+    interval_sec: float = 60.0          # discovery sweep: page 1 of the firehose
+    deep_interval_sec: float = 300.0    # deeper pages, for velocity on older items
+    deep_pages: int = 3
+    jitter: float = 0.2                 # +/- fraction, so the pattern isn't periodic
+    session_refresh_min: float = 30.0   # re-bootstrap cookies this often
+    threshold_refresh_sec: float = 600.0
+    max_runtime_sec: float = 20700.0    # 5h45m: exit before the 6h Actions kill
+    cooldown_base_sec: float = 60.0     # first backoff after a block
+    cooldown_max_sec: float = 900.0
+    circuit_breaker_failures: int = 8
+    night: NightBackoff = field(default_factory=NightBackoff)
+
+    # -- the website feed --
+    feed_enabled: bool = True
+    feed_branch: str = "hot-feed"       # force-pushed, single commit, no history
+    feed_publish_interval_sec: float = 300.0
+    feed_limit: int = 120
+
+
+@dataclass(frozen=True)
+class AlertsConfig:
+    """What counts as alert-worthy, and where the alert goes."""
+    enabled: bool = True
+    channel: str = "ntfy"               # 'ntfy' | 'console'
+    ntfy_topic: str = ""
+    ntfy_server: str = "https://ntfy.sh"
+    burst_cap_per_hour: int = 10
+
+    # -- what "hot" means --
+    velocity_window_min: float = 30.0   # anchor rates against this much history
+    floor_favourites_per_hour: float = 4.0
+    min_favourites_gain: int = 3        # raw likes needed; guards short-span rates
+    percentile: float = 99.0
+    min_population: int = 200           # below this, the floor alone decides
+    fav_weight: float = 0.7             # likes: strong intent, arrive later
+    view_weight: float = 0.3            # views: weaker, but arrive earlier
+
+    # -- which listings are eligible --
+    min_age_minutes: float = 3.0        # younger than this, rates are meaningless
+    max_age_minutes: float = 180.0      # older than this, the window has closed
+    population_max_age_min: float = 60.0
+    allow_bootstrap: bool = False       # act on single-sighting estimates?
+
+    # -- price veto (secondary to hotness, never the trigger) --
+    sanity_discount: float = 0.10       # hot AND at least this far under baseline
+    max_price: float = 400.0
+
+
 GENDERS = ("men", "women")
 GARMENT_TYPES = ("clothes", "trousers", "shoes", "bags")
+
+
+@dataclass(frozen=True)
+class SiteConfig:
+    """Where the published page looks for its live data."""
+    # Left blank, the generator derives it from $GITHUB_REPOSITORY at render time.
+    feed_url: str = ""
+    refresh_sec: int = 60
 
 
 @dataclass(frozen=True)
@@ -61,6 +132,9 @@ class Config:
     base_url: str
     scrape: ScrapeConfig
     deals: DealsConfig
+    poll: PollConfig
+    alerts: AlertsConfig
+    site: SiteConfig
     categories: list[Category]
     brands: list[Brand]
     sizes: dict[str, dict[str, list[str]]]  # gender -> type -> allowed size tokens
@@ -74,6 +148,13 @@ class Config:
 
     def allowed_sizes(self, gender: str, garment_type: str) -> list[str]:
         return (self.sizes.get(gender) or {}).get(garment_type) or []
+
+
+def _poll_config(raw: dict) -> PollConfig:
+    """Build PollConfig, expanding the nested `night` block into its dataclass."""
+    settings = dict(raw)
+    night = settings.pop("night", None)
+    return PollConfig(**settings, night=NightBackoff(**(night or {})))
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
@@ -144,6 +225,9 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         base_url=raw.get("base_url", "https://www.vinted.co.uk").rstrip("/"),
         scrape=ScrapeConfig(**(raw.get("scrape") or {})),
         deals=DealsConfig(**(raw.get("deals") or {})),
+        poll=_poll_config(raw.get("poll") or {}),
+        alerts=AlertsConfig(**(raw.get("alerts") or {})),
+        site=SiteConfig(**(raw.get("site") or {})),
         categories=categories,
         brands=brands,
         sizes=sizes,
