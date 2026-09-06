@@ -246,6 +246,14 @@
 
   function showFreshness() {
     if (!feed || !feed.generated_at) return;
+    // A build-time fallback is not live data, however recent its timestamp.
+    // Say so plainly: an empty page that claims to be up to date is worse than
+    // one that admits it never reached the feed.
+    if (feed.stale_fallback) {
+      setStatus("stale", "Not reading the live feed — showing data baked in at " +
+                         "build time. Check the feed URL.");
+      return;
+    }
     var age = Date.now() - Date.parse(feed.generated_at);
     if (isNaN(age)) return;
     if (age > STALE_MS) {

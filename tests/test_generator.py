@@ -190,3 +190,27 @@ def test_fallback_feed_survives_a_database_without_alert_tables(tmp_path):
     feed = build_fallback_feed(Stub())
     assert feed["items"] == []
     assert feed["counts"]["tracked"] == 0
+
+
+def test_shipped_config_pins_an_absolute_feed_url():
+    """The URL must not depend on where the page happened to be rendered.
+
+    Deriving it from $GITHUB_REPOSITORY meant a render outside Actions produced
+    the relative "hot.json", which resolves to the empty build-time fallback
+    beside the page instead of the live feed -- a page that looks healthy and is
+    silently, permanently empty.
+    """
+    from src.config import load_config
+    from src.site.generator import resolve_feed_url
+
+    config = load_config("config/config.yaml")
+    url = resolve_feed_url(config.site.feed_url, config.poll.feed_branch)
+    assert url.startswith("https://")
+    assert config.poll.feed_branch in url
+
+
+def test_a_pinned_url_beats_the_environment(monkeypatch):
+    from src.site.generator import resolve_feed_url
+    monkeypatch.setenv("GITHUB_REPOSITORY", "someone/else")
+    assert resolve_feed_url("https://pinned.example/f.json", "hot-feed") \
+        == "https://pinned.example/f.json"

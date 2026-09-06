@@ -61,9 +61,12 @@ poll:
 
 # --- website --------------------------------------------------------------
 site:
-  # Where the page fetches its live feed. Left blank, it's derived from
-  # $GITHUB_REPOSITORY at render time, which is right for GitHub Actions.
-  feed_url: ""
+  # Pinned, not derived. Deriving it from $GITHUB_REPOSITORY meant the URL
+  # depended on *where* the page was rendered: a render outside Actions fell
+  # back to the relative "hot.json", which resolves to the empty build-time
+  # fallback sitting next to the page rather than the live feed -- a page that
+  # looks fine and is silently, permanently empty.
+  feed_url: "https://raw.githubusercontent.com/wackro/outdoor-gear-scraper/hot-feed/hot.json"
   refresh_sec: 60
 
 # --- instant alerts --------------------------------------------------------
