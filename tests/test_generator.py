@@ -130,3 +130,63 @@ def test_javascript_urls_are_rejected_by_the_client():
     assert "/^https?:\\/\\//i.test(value)" in source
     assert "link.href = item.url" not in source
     assert "img.src = item.image_url" not in source
+
+
+class TestRenderOnly:
+    """Rebuilding the page without scraping.
+
+    The page shell is code; tying its rebuild to a Vinted scrape meant a
+    template change could only reach the site once a day, on the back of a
+    network round trip it didn't need.
+    """
+
+    def test_renders_without_touching_the_network(self, tmp_path, monkeypatch):
+        import src.run as run
+
+        def explode(*a, **k):
+            raise AssertionError("render-only must not construct a client")
+
+        monkeypatch.setattr(run, "VintedClient", explode)
+        monkeypatch.setattr(run, "Database", lambda *a, **k: _db(tmp_path))
+        rendered = {}
+        monkeypatch.setattr(run, "render_site",
+                            lambda db, **kw: rendered.update(kw) or tmp_path)
+
+        assert run.main(["--render-only"]) == 0
+        assert "feed_url" in rendered and "feed_branch" in rendered
+
+    def test_full_run_is_still_the_default(self, monkeypatch):
+        import src.run as run
+        called = []
+        monkeypatch.setattr(run, "render_only", lambda cfg: called.append("render") or 0)
+        run.main(["--render-only"])
+        assert called == ["render"]
+
+
+def _db(tmp_path):
+    from src.storage.db import Database
+    return Database(tmp_path / "v.db")
+
+
+def test_fallback_feed_survives_a_database_without_alert_tables(tmp_path):
+    """The committed DB predates the alert tables until the daily job reruns.
+
+    Rendering the site must not be what fails in that window.
+    """
+    import sqlite3
+
+    from src.site.generator import build_fallback_feed
+    from src.storage.db import Database
+
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE items (id INTEGER PRIMARY KEY)")   # no `alerted`
+    raw.commit()
+    raw.close()
+
+    class Stub:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+    feed = build_fallback_feed(Stub())
+    assert feed["items"] == []
+    assert feed["counts"]["tracked"] == 0

@@ -4,9 +4,15 @@ Run with `python -m src.run`. Exit codes:
   0  success (site regenerated)
   1  scrape produced no items at all (likely blocked) — DB left untouched
   2  unexpected fatal error
+
+`--render-only` skips straight to rendering from the committed database. The page
+shell is code, so a change to it should reach the site in a minute; without this
+flag the only way to re-render would be to scrape Vinted again, which is both
+slow and a pointless request against a rate-limited, undocumented API.
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
@@ -90,11 +96,34 @@ def rebuild_deals(config: Config, db: Database) -> int:
     return len(deals)
 
 
-def main() -> int:
+def render_only(config: Config) -> int:
+    """Regenerate the site from data already in the repo. No network."""
+    with Database() as db:
+        render_site(
+            db, currency=config.currency,
+            feed_url=config.site.feed_url,
+            feed_branch=config.poll.feed_branch,
+            refresh_sec=config.site.refresh_sec,
+        )
+    log.info("Site rendered to docs/ (render-only; no scrape).")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Scrape Vinted and build the site.")
+    parser.add_argument(
+        "--render-only", action="store_true",
+        help="rebuild the site from the committed database without scraping",
+    )
+    args = parser.parse_args(argv)
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     config = load_config()
+
+    if args.render_only:
+        return render_only(config)
 
     with Database() as db:
         client = VintedClient(config)

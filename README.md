@@ -158,9 +158,22 @@ COLD PATH — once a day, owns the data
      → render the page shell to docs/ → GitHub Pages → commit
 ```
 
-The [`vinted-hot-poller`](.github/workflows/poller.yml) workflow runs the fast
-loop; [`daily-vinted-deals`](.github/workflows/daily.yml) runs the daily pipeline
-(`python -m src.run`) and commits `data/vinted.db` and `docs/`.
+Three workflows, each triggered by the thing it actually depends on:
+
+| Workflow | Runs when | Does |
+| --- | --- | --- |
+| [`vinted-hot-poller`](.github/workflows/poller.yml) | continuously | polls, scores, alerts, publishes the feed |
+| [`daily-vinted-deals`](.github/workflows/daily.yml) | daily, **or on a push touching the scraper, pricing, storage or config** | scrapes, rebuilds baselines, commits `data/`, then deploys the site |
+| [`publish-site`](.github/workflows/publish-site.yml) | **on a push touching `src/site/**`** | re-renders and deploys the page — no scrape, ~1 minute |
+
+That split matters: the page shell is code, so a change to it should reach the
+site in a minute. Previously rendering was welded to the daily scrape, so a
+template tweak could only go live once a day, on the back of a Vinted request it
+did not need. `python -m src.run --render-only` is the same path locally.
+
+The site is deployed **straight from the workflow** via GitHub Pages' Actions
+source, so generated HTML is no longer committed — `docs/index.html` alone was
+about 2 MB per day going into git.
 
 **Why a long-running job rather than a frequent cron.** GitHub's scheduled runs on
 this repo land four to seven hours after their cron time — a `*/5` schedule would
