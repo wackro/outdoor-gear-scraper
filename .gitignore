@@ -15,3 +15,9 @@ config/config.local.yaml
 
 # NOTE: data/vinted.db and docs/ are intentionally committed —
 # the SQLite DB is the persistence layer and docs/ is published to Pages.
+
+# Fast-poller working state. Lives in the GitHub Actions cache between runs and
+# is intentionally disposable — never commit it.
+data/hot.db
+data/hot.db-wal
+data/hot.db-shm

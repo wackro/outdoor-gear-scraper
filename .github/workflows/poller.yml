@@ -1,0 +1,68 @@
+name: vinted-hot-poller
+
+# GitHub's scheduled runs on this repo land four to seven hours after the cron
+# time, so cron cannot be trusted to *pace* anything. It is used here only to
+# start a long-running job, which then does its own precise timing internally.
+#
+# Coverage strategy: fire every two hours and let a new run cancel the incumbent.
+# The job itself runs for 5h45m, so even with several hours of scheduling delay
+# there is almost always a live poller, and a fresh run simply takes over.
+on:
+  schedule:
+    - cron: "23 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log alerts instead of pushing them"
+        type: boolean
+        default: false
+      max_runtime_sec:
+        description: "Seconds to poll before exiting"
+        default: "20700"
+
+concurrency:
+  group: vinted-hot-poller
+  cancel-in-progress: true    # newest run wins; handover, never a pile-up
+
+permissions:
+  contents: read              # the poller never writes to the repo
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355      # just under the 6h hard limit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # The combined cache action registers a post-step, and post-steps run even
+      # when a job is cancelled — which matters here, because cancel-in-progress
+      # is exactly how this job normally ends. The key is unique so it always
+      # misses and therefore always saves; restore-keys picks up the newest
+      # previous state by prefix.
+      - name: Restore poller state
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/hot.db
+            data/hot.db-wal
+            data/hot.db-shm
+          key: hot-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            hot-state-
+
+      - name: Poll
+        env:
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: |
+          python -m src.hot.poller \
+            --max-runtime "${{ inputs.max_runtime_sec || 20700 }}" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}

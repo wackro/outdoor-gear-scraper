@@ -58,3 +58,17 @@ CREATE TABLE IF NOT EXISTS deals (
     deal_score   REAL NOT NULL,              -- robust z-score
     flagged_at   TEXT NOT NULL
 );
+
+-- Listings we have already pushed an alert for. Durable dedup: the poller's own
+-- state lives in a throwaway cache file, so without this a lost cache would
+-- re-alert on everything still listed.
+CREATE TABLE IF NOT EXISTS alerted (
+    item_id    INTEGER PRIMARY KEY,
+    alerted_at TEXT NOT NULL,
+    heat       REAL,
+    fav_rate   REAL,                       -- favourites/hour at alert time
+    view_rate  REAL,
+    price      REAL,
+    baseline   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_alerted_at ON alerted(alerted_at);

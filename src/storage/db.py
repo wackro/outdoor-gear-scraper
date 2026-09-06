@@ -41,7 +41,14 @@ class Database:
         """Add columns introduced after a DB was first created (CREATE IF NOT
         EXISTS won't alter an existing table)."""
         have = {row["name"] for row in self.conn.execute("PRAGMA table_info(items)")}
-        for col, decl in (("gender", "TEXT"), ("garment_type", "TEXT"), ("condition", "TEXT")):
+        for col, decl in (
+            ("gender", "TEXT"), ("garment_type", "TEXT"), ("condition", "TEXT"),
+            # Attention counters, added for the hotness poller. Recorded on the
+            # daily scrape too, so the site can show them and so there is a
+            # historical record to calibrate the alert thresholds against.
+            ("favourite_count", "INTEGER"), ("view_count", "INTEGER"),
+            ("listed_ts", "INTEGER"),
+        ):
             if col not in have:
                 self.conn.execute(f"ALTER TABLE items ADD COLUMN {col} {decl}")
 
@@ -66,20 +73,25 @@ class Database:
             """
             INSERT INTO items (id, brand, brand_title, category, catalog_id, gender,
                                garment_type, title, price, currency, size, condition,
-                               url, image_url, first_seen, last_seen, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                               url, image_url, first_seen, last_seen, active,
+                               favourite_count, view_count, listed_ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                price     = excluded.price,
-                size      = excluded.size,
-                condition = excluded.condition,
-                image_url = excluded.image_url,
-                last_seen = excluded.last_seen,
-                active    = 1
+                price           = excluded.price,
+                size            = excluded.size,
+                condition       = excluded.condition,
+                image_url       = excluded.image_url,
+                last_seen       = excluded.last_seen,
+                active          = 1,
+                favourite_count = excluded.favourite_count,
+                view_count      = excluded.view_count,
+                listed_ts       = COALESCE(items.listed_ts, excluded.listed_ts)
             """,
             (
                 item.id, brand, item.brand_title, category, catalog_id, gender,
                 garment_type, item.title, item.price, item.currency or "GBP", item.size,
                 item.condition, item.url, item.image_url, now, now,
+                item.favourite_count, item.view_count, item.listed_ts,
             ),
         )
 
@@ -165,6 +177,39 @@ class Database:
             ORDER BY d.discount_pct DESC
             """
         ).fetchall()
+
+    def merge_alerts(self, hot_db_path: str | Path) -> int:
+        """Copy the poller's alert log into the committed DB.
+
+        The poller keeps its dedup state in a throwaway cache file. Folding it
+        into the repo once a day means a lost cache costs at most a few hours of
+        dedup rather than re-notifying on every listing we already pushed.
+        """
+        hot_path = Path(hot_db_path)
+        if not hot_path.exists():
+            return 0
+        self.conn.execute("ATTACH DATABASE ? AS hot", (f"file:{hot_path}?mode=ro",))
+        try:
+            cur = self.conn.execute(
+                """
+                INSERT INTO alerted (item_id, alerted_at, heat, fav_rate, view_rate,
+                                     price, baseline)
+                SELECT item_id, alerted_at, heat, fav_rate, view_rate, price, baseline
+                FROM hot.alerts
+                WHERE true
+                ON CONFLICT(item_id) DO NOTHING
+                """
+            )
+            merged = cur.rowcount
+            # The attached database is enrolled in the open transaction, and
+            # SQLite refuses to DETACH inside one. Commit before detaching.
+            self.conn.commit()
+            return merged
+        finally:
+            self.conn.execute("DETACH DATABASE hot")
+
+    def alerted_ids(self) -> list[int]:
+        return [row[0] for row in self.conn.execute("SELECT item_id FROM alerted")]
 
     def commit(self) -> None:
         self.conn.commit()
