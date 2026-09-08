@@ -280,3 +280,48 @@ class TestCategoryConfig:
             "  - {id: 2, gender: men, type: clothes, name: men_a}\n")
         with pytest.raises(ValueError, match="Duplicate category name"):
             load_config(path)
+
+
+class TestRotation:
+    """Rotation time is the number that actually matters, and it drifts silently.
+
+    It is a function of three separate settings -- category count, deep_pages and
+    interval_sec -- so changing any one of them in isolation can quietly make the
+    poller slower than it was. That has now happened twice: once when categories
+    were added without adjusting deep_pages (17 minutes), and once when a stale
+    comment claimed a rotation the config no longer produced.
+    """
+
+    MAX_ROTATION_MIN = 8.0
+
+    def _rotation_minutes(self, config) -> float:
+        per_cycle = max(1, min(config.poll.deep_pages, len(config.categories)))
+        cycles = len(config.categories) / per_cycle
+        return cycles * config.poll.interval_sec / 60.0
+
+    def test_rotation_stays_under_the_ceiling(self):
+        from src.config import load_config
+        rotation = self._rotation_minutes(load_config("config/config.yaml"))
+        assert rotation <= self.MAX_ROTATION_MIN, (
+            f"rotation is {rotation:.1f} min — a listing could be that old before "
+            f"the poller first sees it. Raise poll.deep_pages or cut categories."
+        )
+
+    def test_the_comment_matches_the_setting(self):
+        """The rotation figure written in the config comment must be true.
+
+        A stale comment survived two commits describing pacing that no longer
+        existed, which is how the regression went unnoticed.
+        """
+        import re
+        from src.config import load_config
+
+        text = open("config/config.yaml").read()
+        block = text[text.index("  deep_pages:"):]
+        block = block[:block.index("\n  jitter:")]
+        claimed = re.search(r"(\d+) of (\d+)", block)
+        assert claimed, "the deep_pages comment should state 'N of M' categories"
+
+        config = load_config("config/config.yaml")
+        assert int(claimed.group(1)) == config.poll.deep_pages
+        assert int(claimed.group(2)) == len(config.categories)
