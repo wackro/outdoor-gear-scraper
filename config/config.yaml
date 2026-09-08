@@ -39,8 +39,8 @@ sizes:
 # the interval a favourite-count delta needs in order to be measurable.
 poll:
   interval_sec: 120          # seconds between cycles
-  deep_pages: 2              # categories swept per cycle. 2 of 12 at 120s means
-                             # every category is revisited every 12 minutes, which
+  deep_pages: 2              # categories swept per cycle. 2 of 10 at 120s means
+                             # every category is revisited every 10 minutes, which
                              # is also the worst-case age of a listing when we
                              # first see it. Raise to 4 to halve that back to 6
                              # minutes at the same request rate as a 60s cycle.
@@ -112,13 +112,11 @@ alerts:
 # filtering. (ids are fallbacks if resolution ever fails.)
 categories:
   - {gender: men,   type: clothes,  search: "Jackets",              id: 2052}
-  - {gender: men,   type: clothes,  search: "Tops & t-shirts",      id: 76}
   - {gender: men,   type: clothes,  search: "Jumpers & sweaters",   id: 79}
   - {gender: men,   type: trousers, search: "Trousers",             id: 34}
   - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
   - {gender: men,   type: bags,     search: "Bags & backpacks",     id: 94}
   - {gender: women, type: clothes,  search: "Jackets",              id: 1908}
-  - {gender: women, type: clothes,  search: "Tops & t-shirts",      id: 12}
   - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1917}
   - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 573}
   - {gender: women, type: shoes,    search: "Shoes",                id: 16}
