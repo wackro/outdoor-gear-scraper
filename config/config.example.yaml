@@ -105,15 +105,34 @@ alerts:
   sanity_discount: 0.10
   max_price: 400
 
-# Categories to scrape, resolved to catalog ids by name within their gender
-# department. `type: bags` items appear in a unisex "Bags" tab and skip size
-# filtering. (ids are fallbacks if resolution ever fails.)
+# Categories to watch, identified by Vinted catalog id.
+#
+# By id, not by title: the men's tree has genuine duplicate titles -- "Outerwear"
+# is both 1206 and 581, "Shorts" is both 80 and 586 -- so a title lookup can
+# silently bind to the wrong node. `python -m scripts.list_categories` dumps the
+# full tree with ids.
+#
+# `name` is the database key, not a display name. It appears in items.category,
+# deals.category and baselines.category, so renaming one orphans that category's
+# accumulated price history. The Vinted title is in the trailing comment.
 categories:
-  - {gender: men,   type: clothes,  search: "Jackets",              id: 2052}
-  - {gender: men,   type: clothes,  search: "Jumpers & sweaters",   id: 79}
-  - {gender: men,   type: trousers, search: "Trousers",             id: 34}
-  - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
-  - {gender: men,   type: bags,     search: "Bags & backpacks",     id: 94}
+  - {id: 2052, gender: men, type: clothes,  name: men_jackets             }  # Jackets
+  - {id:   79, gender: men, type: clothes,  name: men_jumpers_&_sweaters  }  # Jumpers & sweaters
+  - {id:   34, gender: men, type: trousers, name: men_trousers            }  # Trousers
+  - {id: 1231, gender: men, type: shoes,    name: men_shoes               }  # Shoes
+  - {id:   94, gender: men, type: bags,     name: men_bags_&_backpacks    }  # Bags & backpacks
+  - {id: 1858, gender: men, type: clothes,  name: men_fleece_jackets      }  # Fleece jackets
+  - {id: 2536, gender: men, type: clothes,  name: men_puffer_jackets      }  # Puffer jackets
+  - {id: 1859, gender: men, type: clothes,  name: men_raincoats           }  # Raincoats
+  - {id: 2551, gender: men, type: clothes,  name: men_windbreakers        }  # Windbreakers
+  - {id: 2553, gender: men, type: clothes,  name: men_gilets              }  # Gilets & body warmers
+  - {id: 2539, gender: men, type: clothes,  name: men_ski_jackets         }  # Ski & snowboard jackets
+  - {id:  267, gender: men, type: clothes,  name: men_hoodies             }  # Hoodies & sweaters
+  - {id:  585, gender: men, type: clothes,  name: men_pullovers           }  # Pullovers & sweaters
+  - {id: 2678, gender: men, type: shoes,    name: men_hiking_boots        }  # Hiking boots & shoes
+  - {id: 1453, gender: men, type: shoes,    name: men_running_shoes       }  # Running shoes
+  - {id: 2673, gender: men, type: shoes,    name: men_climbing_shoes      }  # Climbing & bouldering shoes
+  - {id:  246, gender: men, type: bags,     name: men_backpacks           }  # Backpacks
 
 # Brands to watch (resolved by name; add a `search` when the display name differs
 # from the key, e.g. accents). Unresolved brands are logged and skipped.

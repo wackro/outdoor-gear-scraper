@@ -246,16 +246,28 @@ brand search URL on [vinted.co.uk](https://www.vinted.co.uk).
 
 ### Categories, sizes and quality
 
-**Categories** are configured by name too — each entry has a `gender`
-(`men`/`women`), a garment `type` (`clothes`/`trousers`/`shoes`) and a `search`
-title that's resolved to a Vinted catalog id (from the site's category tree,
-cached in `data/category_ids.json`; the `id` field is a fallback):
+**Categories** are identified by **Vinted catalog `id`**, with the human-readable
+title in a trailing comment:
 
 ```yaml
 categories:
-  - {gender: men,   type: clothes,  search: "Jackets"}
-  - {gender: women, type: shoes,    search: "Shoes"}
+  - {id: 2052, gender: men, type: clothes, name: men_jackets}        # Jackets
+  - {id: 2678, gender: men, type: shoes,   name: men_hiking_boots}   # Hiking boots & shoes
 ```
+
+By id rather than title, because Vinted's tree contains genuine duplicate
+titles — "Outerwear" is both `1206` and `581`, "Shorts" is both `80` and `586` —
+so a title lookup can silently bind to the wrong node. To find ids:
+
+```bash
+python -m scripts.list_categories        # dumps the men's tree; pass "Women" etc. for others
+```
+
+`name` is the **database key**, not a display name: it appears in
+`items.category`, `deals.category` and `baselines.category`, so renaming one
+orphans that category's accumulated price history. Duplicate ids and duplicate
+names are both rejected at load time — each would otherwise fail silently, one
+by wasting a rotation slot, the other by merging two categories' history.
 
 **Sizes** are an allow-list per gender + type; anything else is hidden. Matching
 is strict and type-aware (shoes read the UK number, trousers read the waist,

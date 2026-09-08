@@ -78,7 +78,6 @@ def build(tmp_path):
             client=client,
             notifier=notifier,
             brands=BrandResolution(ids={"rab": 1}, name_by_title={"rab": "rab"}),
-            category_ids={c.name: (c.id or 1) for c in config.categories},
         )
         poller.categories = poller.categories[:categories]
         return poller, client, notifier
@@ -121,7 +120,7 @@ def test_a_cold_listing_is_tracked_but_not_alerted(build):
 def test_categories_are_swept_in_rotation(build):
     # Two per cycle out of fourteen, so a full pass takes seven cycles rather
     # than firing fourteen requests a minute at a DataDome-protected endpoint.
-    poller, client, _ = build([], categories=14)
+    poller, client, _ = build([], categories=17)
     poller.run(once=True)
     assert client.calls == poller.config.poll.deep_pages
 
