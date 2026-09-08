@@ -119,11 +119,22 @@ class SiteConfig:
 
 @dataclass(frozen=True)
 class Category:
-    name: str          # unique key, e.g. "men_jackets"
+    """One Vinted catalog category to watch.
+
+    Identified by `id` alone. Resolving by title used to be supported, but
+    Vinted's men's tree contains genuine duplicate titles -- "Outerwear" is both
+    1206 and 581, "Shorts" is both 80 and 586 -- so a title lookup could silently
+    bind to the wrong node. Ids are unambiguous; the human-readable title lives
+    in a comment beside each entry in config.yaml.
+
+    `name` is the stable database key, not a display name: it appears in
+    `items.category`, `deals.category` and `baselines.category`, so changing one
+    orphans that category's accumulated price history.
+    """
+    name: str          # stable DB key, e.g. "men_jackets" -- do not rename
     gender: str        # "men" | "women"
-    type: str          # "clothes" | "trousers" | "shoes"
-    search: str        # category title to resolve in the tree (e.g. "Jackets")
-    id: int | None = None  # optional fixed catalog id (fallback / pin)
+    type: str          # "clothes" | "trousers" | "shoes" | "bags"
+    id: int            # Vinted catalog id
 
 
 @dataclass(frozen=True)
@@ -173,25 +184,34 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         raise ValueError("Config must define at least one entry under `categories`.")
 
     categories: list[Category] = []
+    seen_ids: dict[int, str] = {}
+    seen_names: set[str] = set()
     for entry in categories_raw:
         gender = entry.get("gender")
         gtype = entry.get("type")
-        search = entry.get("search")
+        name = entry.get("name")
         if gender not in GENDERS:
             raise ValueError(f"Category {entry!r} needs gender one of {GENDERS}.")
         if gtype not in GARMENT_TYPES:
             raise ValueError(f"Category {entry!r} needs type one of {GARMENT_TYPES}.")
-        if not search:
-            raise ValueError(f"Category {entry!r} needs a `search` title.")
-        name = entry.get("name") or f"{gender}_{search.lower().replace(' ', '_')}"
-        categories.append(
-            Category(
-                name=name,
-                gender=gender,
-                type=gtype,
-                search=search,
-                id=int(entry["id"]) if entry.get("id") is not None else None,
+        if entry.get("id") is None:
+            raise ValueError(f"Category {entry!r} needs an `id` (see scripts/list_categories.py).")
+        if not name:
+            raise ValueError(f"Category {entry!r} needs a `name` (its database key).")
+        catalog_id = int(entry["id"])
+        # Both are silent failure modes if duplicated: a repeated id wastes a
+        # rotation slot re-reading the same listings, and a repeated name merges
+        # two categories' price history into one bracket.
+        if catalog_id in seen_ids:
+            raise ValueError(
+                f"Duplicate category id {catalog_id}: {name!r} and {seen_ids[catalog_id]!r}."
             )
+        if name in seen_names:
+            raise ValueError(f"Duplicate category name {name!r}.")
+        seen_ids[catalog_id] = name
+        seen_names.add(name)
+        categories.append(
+            Category(name=name, gender=gender, type=gtype, id=catalog_id)
         )
 
     brands_raw = raw.get("brands") or {}

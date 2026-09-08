@@ -28,7 +28,6 @@ from ..config import Config, load_config
 from ..notify import Notifier, build_notifier
 from ..storage.db import DEFAULT_DB_PATH
 from ..vinted.brand_resolver import BrandResolution, resolve_brands
-from ..vinted.category_resolver import resolve_category_ids
 from ..vinted.client import VintedBlocked, VintedClient, VintedError, _norm
 from .alerts import BaselineLookup, evaluate, population_rates
 from .feed import build_feed, feed_changed
@@ -106,7 +105,6 @@ class Poller:
         client: VintedClient,
         notifier: Notifier,
         brands: BrandResolution,
-        category_ids: dict[str, int],
         *,
         dry_run: bool = True,
     ):
@@ -120,9 +118,7 @@ class Poller:
         self.notifier = notifier
         self.brands = brands
         self.brand_ids = list(brands.ids.values())
-        # Only categories that actually resolved; anything else is dead weight.
-        self.categories = [c for c in config.categories if c.name in category_ids]
-        self.category_ids = category_ids
+        self.categories = list(config.categories)
         self.baselines = BaselineLookup({})
 
         self.bar = build_bar(
@@ -237,7 +233,7 @@ class Poller:
         for category in categories:
             if self._stop:
                 return
-            catalog_id = self.category_ids[category.name]
+            catalog_id = category.id
             try:
                 items = self.client.fetch_page(self.brand_ids, catalog_id, page=1)
                 self.stats.requests += 1
@@ -470,10 +466,9 @@ class Poller:
 def build_poller(config: Config, *, dry_run: bool, hot_db: Path) -> Poller:
     client = VintedClient(config)
     brands = resolve_brands(client, config.brands)
-    category_ids = resolve_category_ids(client, config.categories)
     log.info(
-        "Resolved %d/%d brands and %d/%d categories.",
-        len(brands.ids), len(config.brands), len(category_ids), len(config.categories),
+        "Resolved %d/%d brands; watching %d categories.",
+        len(brands.ids), len(config.brands), len(config.categories),
     )
     poller = Poller(
         config=config,
@@ -481,7 +476,6 @@ def build_poller(config: Config, *, dry_run: bool, hot_db: Path) -> Poller:
         client=client,
         notifier=build_notifier(config, dry_run=dry_run),
         brands=brands,
-        category_ids=category_ids,
         dry_run=dry_run,        # also suppresses pushing the site feed
     )
     poller.load_baselines()

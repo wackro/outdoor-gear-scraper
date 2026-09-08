@@ -1,0 +1,33 @@
+name: list-categories
+
+# One-off lookup: dumps Vinted's catalog tree to the job summary so categories
+# can be picked from the real thing instead of guessed at. Runs when the script
+# changes (so it reports immediately on push) and on demand after that.
+on:
+  push:
+    paths:
+      - 'scripts/list_categories.py'
+      - '.github/workflows/catalog.yml'
+  workflow_dispatch:
+    inputs:
+      departments:
+        description: "Departments to list, space separated (e.g. 'Men Women')"
+        default: "Men"
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python -m scripts.list_categories ${{ inputs.departments || 'Men' }}

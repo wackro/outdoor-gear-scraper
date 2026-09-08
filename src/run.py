@@ -28,7 +28,6 @@ from .site.generator import render_site
 from .hot.state import DEFAULT_HOT_DB
 from .storage.db import Database
 from .vinted.brand_resolver import BrandResolution, resolve_brands
-from .vinted.category_resolver import resolve_category_ids
 from .vinted.client import VintedClient, VintedError, _norm
 
 log = logging.getLogger("run")
@@ -39,7 +38,6 @@ def scrape(
     db: Database,
     client: VintedClient,
     brands: BrandResolution,
-    category_ids: dict[str, int],
 ) -> int:
     """Scrape every category once (filtered to all watched brands at once).
 
@@ -53,9 +51,7 @@ def scrape(
 
     total = 0
     for category in config.categories:
-        catalog_id = category_ids.get(category.name)
-        if catalog_id is None:
-            continue  # unresolved category (already logged)
+        catalog_id = category.id
         try:
             items = client.fetch_items(all_brand_ids, catalog_id)
         except VintedError as exc:
@@ -129,9 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         client = VintedClient(config)
         brands = resolve_brands(client, config.brands)
         log.info("Resolved %d/%d brands to ids.", len(brands.ids), len(config.brands))
-        category_ids = resolve_category_ids(client, config.categories)
-        log.info("Resolved %d/%d categories to ids.", len(category_ids), len(config.categories))
-        total = scrape(config, db, client, brands, category_ids)
+        log.info("Watching %d categories.", len(config.categories))
+        total = scrape(config, db, client, brands)
 
         if total == 0:
             # Almost certainly blocked or the API changed. Do NOT commit — this
