@@ -38,8 +38,12 @@ sizes:
 # categories, so every category is revisited every few minutes — which is also
 # the interval a favourite-count delta needs in order to be measurable.
 poll:
-  interval_sec: 60           # seconds between cycles
-  deep_pages: 2              # categories swept per cycle (2 of 14 -> ~7min full rotation)
+  interval_sec: 120          # seconds between cycles
+  deep_pages: 2              # categories swept per cycle. 2 of 12 at 120s means
+                             # every category is revisited every 12 minutes, which
+                             # is also the worst-case age of a listing when we
+                             # first see it. Raise to 4 to halve that back to 6
+                             # minutes at the same request rate as a 60s cycle.
   jitter: 0.2                # +/- fraction, so requests aren't a metronome
   session_refresh_min: 30    # re-bootstrap Vinted cookies this often
   threshold_refresh_sec: 600
