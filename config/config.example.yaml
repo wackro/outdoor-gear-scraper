@@ -28,6 +28,8 @@ sizes:
     clothes:  [M, L]
     trousers: [30, 32]
     shoes:    [8.5, 9]
+  # Unused while there are no women's categories configured. Kept so the rules
+  # are intact if any are added back.
   women:
     clothes:  [XS, S, 6, 8]
     trousers: [8, 10]
@@ -40,7 +42,7 @@ sizes:
 poll:
   interval_sec: 120          # seconds between cycles
   deep_pages: 2              # categories swept per cycle. 2 of 10 at 120s means
-                             # every category is revisited every 10 minutes, which
+                             # every category is revisited every 5 minutes, which
                              # is also the worst-case age of a listing when we
                              # first see it. Raise to 4 to halve that back to 6
                              # minutes at the same request rate as a 60s cycle.
@@ -112,11 +114,6 @@ categories:
   - {gender: men,   type: trousers, search: "Trousers",             id: 34}
   - {gender: men,   type: shoes,    search: "Shoes",                id: 1231}
   - {gender: men,   type: bags,     search: "Bags & backpacks",     id: 94}
-  - {gender: women, type: clothes,  search: "Jackets",              id: 1908}
-  - {gender: women, type: clothes,  search: "Jumpers & hoodies",    id: 1917}
-  - {gender: women, type: trousers, search: "Trousers, shorts & dungarees", id: 573}
-  - {gender: women, type: shoes,    search: "Shoes",                id: 16}
-  - {gender: women, type: bags,     search: "Bags",                 id: 19}
 
 # Brands to watch (resolved by name; add a `search` when the display name differs
 # from the key, e.g. accents). Unresolved brands are logged and skipped.
