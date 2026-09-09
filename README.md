@@ -14,8 +14,8 @@ speeds:
   out per-brand baselines, and rebuilds the website.
 
 No servers, no database service, no running costs: **GitHub Actions** does the
-work, a **SQLite file in the repo** stores the history, and the site is served
-from **GitHub Pages**.
+work, a **SQLite file on its own git branch** stores the history, and the site is
+served from **GitHub Pages**.
 
 ## Instant alerts
 
@@ -182,13 +182,26 @@ then does its own precise timing internally for 5h45m. A new run cancels the
 incumbent, so scheduling delay shifts the handover rather than leaving a gap.
 
 **Why the poller never commits the database.** `data/vinted.db` is tens of
-megabytes and committed to git. Writing it every 60 seconds would bloat the repo
-without bound. The poller keeps a small, disposable state file in the Actions
-cache instead; the daily job folds its alert log *and the listings themselves*
-into the committed DB — the latter matters because a listing that appears and
-sells between daily scrapes would otherwise have no title or photo to display.
+megabytes. Writing it every 60 seconds would bloat the repo without bound. The
+poller keeps a small, disposable state file in the Actions cache instead; the
+daily job folds its alert log *and the listings themselves* into the database —
+the latter matters because a listing that appears and sells between daily
+scrapes would otherwise have no title or photo to display.
 
 The only thing the poller pushes is the feed, and only to its own orphan branch.
+
+**Where the database lives.** On its own single-commit branch (`db-snapshot`),
+not in `main`'s history. It used to be committed on every daily run, which added
+a fresh multi-megabyte blob per run and took `.git` past 260 MB. The daily job
+fetches it before scraping and force-pushes it back afterwards
+(`python -m scripts.db_snapshot pull` / `push`), so only the current copy is ever
+stored. Note this stops the growth rather than reversing it: the blobs already in
+`main`'s history stay there unless that history is rewritten.
+
+Two sizes bound it. `prune_items_days` deletes listings that are gone and were
+never alerted — without it the file grew ~2 MB a day forever, and git refuses a
+push above 100 MB. `window_days` bounds the price observations. Together they
+settle the file at roughly 30 MB.
 
 ## Setup
 
@@ -327,11 +340,14 @@ src/run.py         daily orchestrator
 scripts/probe_api.py     verifies the API still returns what the poller needs
 scripts/preview_site.py  renders the site with sample data, for design review
 tests/             pytest suite (no network required)
-data/vinted.db     committed SQLite (source of truth)
+src/orphan_branch.py  single-commit branch plumbing, shared by the two below
+scripts/db_snapshot.py   moves the database on and off its branch
+data/vinted.db     SQLite (source of truth) — not in git; see `db-snapshot`
 data/hot.db        poller working state — gitignored, lives in the Actions cache
 docs/              generated site (GitHub Pages source)
-.github/workflows/ daily.yml, poller.yml, tests.yml
-(branch `hot-feed`)  the live JSON feed — one commit, force-pushed
+.github/workflows/ daily.yml, poller.yml, publish-site.yml, tests.yml
+(branch `hot-feed`)    the live JSON feed — one commit, force-pushed
+(branch `db-snapshot`) the SQLite database — one commit, force-pushed
 ```
 
 ## Caveats & legal
