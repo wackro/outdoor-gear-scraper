@@ -66,7 +66,9 @@ def scrape(
                 item, brand=brand_name, category=category.name, catalog_id=catalog_id,
                 gender=category.gender, garment_type=category.type,
             )
-            db.add_observation(item, brand=brand_name, category=category.name)
+            db.add_observation(
+                item, brand=brand_name, category=category.name, catalog_id=catalog_id,
+            )
             stored += 1
         total += stored
         log.info("%s: %d items", category.name, stored)

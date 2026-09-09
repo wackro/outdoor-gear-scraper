@@ -25,13 +25,18 @@ CREATE INDEX IF NOT EXISTS idx_items_brand_cat ON items(brand, category);
 CREATE INDEX IF NOT EXISTS idx_items_active ON items(active, last_seen);
 
 -- Append-only price observations that feed the baseline. Prunable by window_days.
+--
+-- `catalog_id` is the category, and is per-observation rather than looked up from
+-- `items`: a listing can be returned by more than one category sweep, and this
+-- records which one actually saw it at this price.
 CREATE TABLE IF NOT EXISTS price_observations (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id   INTEGER NOT NULL,
-    brand     TEXT NOT NULL,
-    category  TEXT NOT NULL,
-    price     REAL NOT NULL,
-    observed  TEXT NOT NULL                  -- ISO8601 UTC (run timestamp)
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id    INTEGER NOT NULL,
+    brand      TEXT NOT NULL,
+    category   TEXT NOT NULL,
+    catalog_id INTEGER,
+    price      REAL NOT NULL,
+    observed   TEXT NOT NULL                 -- ISO8601 UTC (run timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_obs_bracket ON price_observations(brand, category, observed);
 

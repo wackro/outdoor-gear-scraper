@@ -11,6 +11,50 @@ from ..vinted.models import VintedItem
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "vinted.db"
 
+SCHEMA_VERSION = 1
+
+# Every category name this database has ever stored, and the Vinted catalog id it
+# means. Frozen as a literal on purpose.
+#
+# Categories used to be keyed by this name; they are keyed by `catalog_id` now,
+# and re-keying the history needs exactly these pairs. Deriving them from
+# `items` at migration time very nearly works -- the mapping is 1:1 in both
+# directions, verified across all 26 -- but it is quietly time-dependent: a
+# retired category's listings all go inactive, `prune_items` then deletes them,
+# and its mapping disappears with them. The backfill would write NULL and no
+# test would notice. Written down, it cannot rot.
+#
+# Nine of these are retired (the women's categories, jeans, t-shirts) and are not
+# in config.yaml at all, which is the other reason config cannot be the source.
+HISTORICAL_CATALOG_IDS = {
+    "men_backpacks": 246,
+    "men_bags_&_backpacks": 94,
+    "men_climbing_shoes": 2673,
+    "men_fleece_jackets": 1858,
+    "men_gilets": 2553,
+    "men_hiking_boots": 2678,
+    "men_hoodies": 267,
+    "men_jackets": 2052,
+    "men_jeans": 257,
+    "men_jumpers_&_sweaters": 79,
+    "men_puffer_jackets": 2536,
+    "men_pullovers": 585,
+    "men_raincoats": 1859,
+    "men_running_shoes": 1453,
+    "men_shoes": 1231,
+    "men_ski_jackets": 2539,
+    "men_tops_&_t-shirts": 76,
+    "men_trousers": 34,
+    "men_windbreakers": 2551,
+    "women_bags": 19,
+    "women_jackets": 1908,
+    "women_jeans": 183,
+    "women_jumpers_&_hoodies": 1917,
+    "women_shoes": 16,
+    "women_tops_&_t-shirts": 12,
+    "women_trousers,_shorts_&_dungarees": 573,
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -50,6 +94,10 @@ class Database:
         have = {row["name"] for row in self.conn.execute("PRAGMA table_info(items)")}
         for col, decl in (
             ("gender", "TEXT"), ("garment_type", "TEXT"), ("condition", "TEXT"),
+            # Only ever reached a database created after it was added to
+            # schema.sql; older files never grew it, which is the gap the
+            # catalog-id migration below then has to fill.
+            ("catalog_id", "INTEGER"),
             # Attention counters, added for the hotness poller. Recorded on the
             # daily scrape too, so the site can show them and so there is a
             # historical record to calibrate the alert thresholds against.
@@ -63,6 +111,79 @@ class Database:
         for col, decl in (("sold_at", "TEXT"), ("seconds_to_sell", "INTEGER")):
             if col not in have_alerted:
                 self.conn.execute(f"ALTER TABLE alerted ADD COLUMN {col} {decl}")
+
+        if self._version() < 1:
+            self._key_categories_by_id()
+            self._set_version(1)
+
+    def _version(self) -> int:
+        return self.conn.execute("PRAGMA user_version").fetchone()[0]
+
+    def _set_version(self, version: int) -> None:
+        # Not parameterisable; the value is ours, not user input.
+        self.conn.execute(f"PRAGMA user_version = {int(version)}")
+
+    def _catalog_id_map(self) -> dict[str, int]:
+        """name -> catalog id, for backfilling history.
+
+        `HISTORICAL_CATALOG_IDS` is the frozen record and wins where it applies.
+        Anything this database has learned since is read out of `items`, so a
+        category added between that literal being written and this migration
+        running still resolves. Where both know a name they must agree.
+        """
+        derived = {
+            row["category"]: row["catalog_id"]
+            for row in self.conn.execute(
+                "SELECT category, catalog_id FROM items "
+                "WHERE catalog_id IS NOT NULL GROUP BY category"
+            )
+        }
+        for name, catalog_id in HISTORICAL_CATALOG_IDS.items():
+            if name in derived and derived[name] != catalog_id:
+                raise RuntimeError(
+                    f"Category {name!r} is id {derived[name]} in items but "
+                    f"{catalog_id} in HISTORICAL_CATALOG_IDS. One is wrong; "
+                    f"re-keying on either would corrupt that category's history."
+                )
+        return {**derived, **HISTORICAL_CATALOG_IDS}
+
+    def _key_categories_by_id(self) -> None:
+        """Give `price_observations` a catalog id, and fill the gaps in `items`.
+
+        Every step is guarded or idempotent and the version is only bumped once
+        they have all succeeded, so an interruption leaves a database this will
+        simply redo -- which beats a transaction whose rollback journal would
+        have to hold a rewrite of the largest table in the file.
+
+        The backfill maps `price_observations.category`, and deliberately does
+        **not** join `item_id` to `items.catalog_id`. That join looks obviously
+        right and is wrong: `upsert_item` never updates `category` on conflict, so
+        `items` records where a listing was *first* seen, while thousands of
+        listings have been observed under more than one category. Joining would
+        silently move those observations into a category they were never seen in,
+        shifting the baselines that decide what counts as a bargain.
+        """
+        have = {row["name"] for row in self.conn.execute(
+            "PRAGMA table_info(price_observations)")}
+        if "catalog_id" not in have:
+            self.conn.execute("ALTER TABLE price_observations ADD COLUMN catalog_id INTEGER")
+
+        mapping = self._catalog_id_map()
+        for table in ("price_observations", "items"):
+            names = [row[0] for row in self.conn.execute(
+                f"SELECT DISTINCT category FROM {table} WHERE catalog_id IS NULL")]
+            unknown = [n for n in names if n not in mapping]
+            if unknown:
+                raise RuntimeError(
+                    f"No catalog id known for {unknown!r} in {table}. Add them to "
+                    f"HISTORICAL_CATALOG_IDS; guessing would silently merge one "
+                    f"category's price history into another."
+                )
+            self.conn.executemany(
+                f"UPDATE {table} SET catalog_id = ? "
+                f"WHERE category = ? AND catalog_id IS NULL",
+                [(mapping[n], n) for n in names],
+            )
 
     def close(self) -> None:
         self.conn.close()
@@ -107,13 +228,16 @@ class Database:
             ),
         )
 
-    def add_observation(self, item: VintedItem, *, brand: str, category: str) -> None:
+    def add_observation(
+        self, item: VintedItem, *, brand: str, category: str, catalog_id: int,
+    ) -> None:
         self.conn.execute(
             """
-            INSERT INTO price_observations (item_id, brand, category, price, observed)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO price_observations
+                   (item_id, brand, category, catalog_id, price, observed)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (item.id, brand, category, item.price, _utc_now_iso()),
+            (item.id, brand, category, catalog_id, item.price, _utc_now_iso()),
         )
 
     def mark_stale_items(self, stale_days: int) -> int:

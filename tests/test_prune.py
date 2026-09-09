@@ -84,7 +84,8 @@ class TestPruneItems:
         """Baselines must not care. They read price_observations, which carries
         its own brand and price and never joins items."""
         store(db, 1, active=0, days_ago=30)
-        db.add_observation(item(1), brand="rab", category="men_jackets")
+        db.add_observation(item(1), brand="rab", category="men_jackets",
+                           catalog_id=2052)
         db.commit()
 
         db.prune_items(7)
