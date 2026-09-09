@@ -16,8 +16,13 @@ scrape:
 deals:
   threshold: 0.30           # flag when price <= median * (1 - threshold)
   min_samples: 8
-  window_days: 90
-  stale_days: 5
+  window_days: 90            # observations older than this stop feeding baselines
+  stale_days: 5              # unseen for this long -> marked inactive
+  prune_items_days: 7        # ...and this long -> deleted outright. The only
+                             # thing bounding the DB file, which is committed to
+                             # git and hard-fails above 100 MB. Observations
+                             # survive, so baselines are unaffected; alerted
+                             # listings are never pruned.
 
 quality:
   floor: Good               # hide anything below this condition

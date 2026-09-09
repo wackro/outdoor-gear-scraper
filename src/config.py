@@ -40,6 +40,11 @@ class DealsConfig:
     min_samples: int = 8
     window_days: int = 90
     stale_days: int = 5
+    # Grace period before a gone, never-alerted listing is deleted outright.
+    # This is what bounds the database file, which is committed to git and so
+    # cannot pass 100 MB. Observations survive the prune, so baselines don't
+    # care; only a relisted item coming back inside the window does.
+    prune_items_days: int = 7
 
 
 @dataclass(frozen=True)

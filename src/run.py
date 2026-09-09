@@ -141,11 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         # lives in a throwaway cache, so this is what makes dedup survive a cache
         # miss instead of re-notifying on everything still listed.
         merged = db.merge_alerts(DEFAULT_HOT_DB)
+        # After rebuild_deals, never before: `deals` still holds the previous
+        # run's rows until then, and they have a foreign key into `items`.
+        # Also after merge_alerts, so items alerted by the poller are protected.
+        dead = db.prune_items(config.deals.prune_items_days)
         db.commit()
+        reclaimed = db.vacuum() if dead else 0
         log.info(
             "Stored %d items, marked %d stale, pruned %d observations, "
-            "flagged %d deals, merged %d alerts.",
-            total, stale, pruned, deal_count, merged,
+            "flagged %d deals, merged %d alerts, deleted %d dead listings "
+            "(reclaimed %.1f MB).",
+            total, stale, pruned, deal_count, merged, dead, reclaimed / 1e6,
         )
 
         render_site(

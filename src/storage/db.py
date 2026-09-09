@@ -136,6 +136,58 @@ class Database:
         )
         return cur.rowcount
 
+    def prune_items(self, keep_days: int) -> int:
+        """Delete listings that are gone and were never hot. Returns rows deleted.
+
+        This is the only thing bounding the file's size. `mark_stale_items` merely
+        flips `active`, observations are pruned on their own much longer window,
+        and the file is committed to git -- which hard-fails above 100 MB.
+
+        Dropping these rows costs nothing analytically:
+
+        - baselines are computed from `price_observations` alone, which carries
+          its own brand/price and never joins `items` (see `observations_within`),
+          so every baseline survives untouched
+        - deal detection only ever reads `active_items()`
+
+        The two exclusions are both load-bearing. Alerted items are the site's
+        sold / time-to-sell history (`alerted JOIN items` in the site generator)
+        and a good many of them are already inactive, so pruning them would erase
+        what the page shows. `keep_days` is the grace period for a relisted item
+        to come back before we forget it.
+
+        **Call this after `replace_deals`, not before.** `deals.item_id`
+        REFERENCES `items(id)` and foreign keys are on, so while `deals` still
+        holds the previous run's rows a delete here can hit an item that run had
+        flagged and this one has just marked inactive.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).replace(
+            microsecond=0
+        ).isoformat()
+        cur = self.conn.execute(
+            """
+            DELETE FROM items
+            WHERE active = 0
+              AND last_seen < ?
+              AND id NOT IN (SELECT item_id FROM alerted)
+            """,
+            (cutoff,),
+        )
+        return cur.rowcount
+
+    def vacuum(self) -> int:
+        """Repack the file, returning the bytes reclaimed.
+
+        Worth doing only after a prune. Deleting rows leaves the pages allocated
+        and partially filled -- `freelist_count` stays near zero and the file
+        never shrinks -- so without this the prune frees nothing on disk. VACUUM
+        cannot run inside a transaction, hence the commit first.
+        """
+        self.conn.commit()
+        before = self.path.stat().st_size
+        self.conn.execute("VACUUM")
+        return before - self.path.stat().st_size
+
     # -- baselines -----------------------------------------------------------
 
     def observations_within(self, window_days: int) -> list[Observation]:
