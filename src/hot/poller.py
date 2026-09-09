@@ -242,18 +242,18 @@ class Poller:
                 self.stats.errors += 1
                 self.stats.blocks += 1
                 self._consecutive_failures += 1
-                log.warning("Blocked fetching %s: %s", category.name, exc)
+                log.warning("Blocked fetching %s: %s", category.label, exc)
                 self._enter_cooldown()
                 return
             except VintedError as exc:
                 self.stats.errors += 1
                 self._consecutive_failures += 1
-                log.warning("Fetch failed for %s: %s", category.name, exc)
+                log.warning("Fetch failed for %s: %s", category.label, exc)
                 return
             except Exception as exc:  # noqa: BLE001 — never die mid-loop
                 self.stats.errors += 1
                 self._consecutive_failures += 1
-                log.warning("Unexpected fetch error for %s: %s", category.name, exc)
+                log.warning("Unexpected fetch error for %s: %s", category.label, exc)
                 return
 
             self._consecutive_failures = 0
@@ -263,25 +263,25 @@ class Poller:
                 if brand is None:
                     continue  # not on the watchlist
                 self.state.record(
-                    item, brand=brand, category=category.name,
+                    item, brand=brand, catalog_id=catalog_id,
                     gender=category.gender, garment_type=category.type, now=now,
                 )
                 self.stats.items_tracked += 1
                 if item.favourite_count is not None:
                     self.stats.items_with_likes += 1
 
-            self._detect_sales(category.name, items, now)
+            self._detect_sales(category, items, now)
             self.client.throttle()
         self.state.commit()
 
-    def _detect_sales(self, category: str, items: list, now: float) -> None:
+    def _detect_sales(self, category, items: list, now: float) -> None:
         """Mark listings that should have been on this page but weren't.
 
         Only meaningful because we poll fast enough for absence to mean something.
         See `src/hot/sold.py` for why this is not simply "wasn't in the response".
         """
         tracked = self.state.tracked_in_category(
-            category, now - self.config.alerts.max_age_minutes * 60
+            category.id, now - self.config.alerts.max_age_minutes * 60
         )
         if not tracked:
             return
@@ -293,7 +293,7 @@ class Poller:
         marked = self.state.mark_gone(gone, now)
         if marked:
             self.stats.sold_seen += marked
-            log.info("%s: %d listing(s) gone (likely sold).", category, marked)
+            log.info("%s: %d listing(s) gone (likely sold).", category.label, marked)
 
     def _enter_cooldown(self) -> None:
         """Back off hard after a block, doubling each time.

@@ -40,6 +40,11 @@ class DealsConfig:
     min_samples: int = 8
     window_days: int = 90
     stale_days: int = 5
+    # Grace period before a gone, never-alerted listing is deleted outright.
+    # This is what bounds the database file, which is committed to git and so
+    # cannot pass 100 MB. Observations survive the prune, so baselines don't
+    # care; only a relisted item coming back inside the window does.
+    prune_items_days: int = 7
 
 
 @dataclass(frozen=True)
@@ -124,17 +129,17 @@ class Category:
     Identified by `id` alone. Resolving by title used to be supported, but
     Vinted's men's tree contains genuine duplicate titles -- "Outerwear" is both
     1206 and 581, "Shorts" is both 80 and 586 -- so a title lookup could silently
-    bind to the wrong node. Ids are unambiguous; the human-readable title lives
-    in a comment beside each entry in config.yaml.
+    bind to the wrong node.
 
-    `name` is the stable database key, not a display name: it appears in
-    `items.category`, `deals.category` and `baselines.category`, so changing one
-    orphans that category's accumulated price history.
+    `label` is for humans only: it appears in log lines and error messages and
+    nowhere else. The database keys categories by `id`, so relabelling one is
+    free. It used to be the database key, which made renaming a category orphan
+    all of its accumulated price history.
     """
-    name: str          # stable DB key, e.g. "men_jackets" -- do not rename
+    label: str         # Vinted's own title, e.g. "Fleece jackets"
     gender: str        # "men" | "women"
     type: str          # "clothes" | "trousers" | "shoes" | "bags"
-    id: int            # Vinted catalog id
+    id: int            # Vinted catalog id -- the key everything else uses
 
 
 @dataclass(frozen=True)
@@ -185,33 +190,30 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
 
     categories: list[Category] = []
     seen_ids: dict[int, str] = {}
-    seen_names: set[str] = set()
     for entry in categories_raw:
         gender = entry.get("gender")
         gtype = entry.get("type")
-        name = entry.get("name")
+        label = entry.get("label")
         if gender not in GENDERS:
             raise ValueError(f"Category {entry!r} needs gender one of {GENDERS}.")
         if gtype not in GARMENT_TYPES:
             raise ValueError(f"Category {entry!r} needs type one of {GARMENT_TYPES}.")
         if entry.get("id") is None:
             raise ValueError(f"Category {entry!r} needs an `id` (see scripts/list_categories.py).")
-        if not name:
-            raise ValueError(f"Category {entry!r} needs a `name` (its database key).")
+        if not label:
+            raise ValueError(f"Category {entry!r} needs a `label` to show in logs.")
         catalog_id = int(entry["id"])
-        # Both are silent failure modes if duplicated: a repeated id wastes a
-        # rotation slot re-reading the same listings, and a repeated name merges
-        # two categories' price history into one bracket.
+        # A duplicate id is silent and costly: it wastes a rotation slot
+        # re-reading listings we already have. A duplicate label is merely
+        # confusing in a log line, and is allowed -- it used to be the database
+        # key, back when repeating one merged two categories' price history.
         if catalog_id in seen_ids:
             raise ValueError(
-                f"Duplicate category id {catalog_id}: {name!r} and {seen_ids[catalog_id]!r}."
+                f"Duplicate category id {catalog_id}: {label!r} and {seen_ids[catalog_id]!r}."
             )
-        if name in seen_names:
-            raise ValueError(f"Duplicate category name {name!r}.")
-        seen_ids[catalog_id] = name
-        seen_names.add(name)
+        seen_ids[catalog_id] = label
         categories.append(
-            Category(name=name, gender=gender, type=gtype, id=catalog_id)
+            Category(label=label, gender=gender, type=gtype, id=catalog_id)
         )
 
     brands_raw = raw.get("brands") or {}

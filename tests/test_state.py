@@ -18,7 +18,7 @@ def item(item_id=1, favourites=3, views=30):
 
 
 def record(state, it, now):
-    state.record(it, brand="rab", category="men_jackets", gender="men",
+    state.record(it, brand="rab", catalog_id=2052, gender="men",
                  garment_type="clothes", now=now)
     state.commit()
 

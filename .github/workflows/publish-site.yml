@@ -54,7 +54,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Renders from the committed database. No network, no Vinted request.
+      # Best-effort, unlike the scrape job. The page's real data is the live
+      # feed it fetches in the browser; the database only supplies the fallback
+      # feed, so rendering without one gives a page that is briefly empty rather
+      # than no page at all. Failing the deploy over it would be worse.
+      - name: Fetch the database
+        continue-on-error: true
+        run: python -m scripts.db_snapshot pull --allow-missing
+
+      # Renders from the database. No network, no Vinted request.
       - name: Render site
         run: python -m src.run --render-only
 

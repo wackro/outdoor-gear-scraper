@@ -126,7 +126,7 @@ def test_categories_are_swept_in_rotation(build):
 
     first = poller._next_categories()
     second = poller._next_categories()
-    assert {c.name for c in first}.isdisjoint({c.name for c in second})
+    assert {c.id for c in first}.isdisjoint({c.id for c in second})
 
 
 def test_rate_limiting_triggers_a_cooldown(build):

@@ -14,8 +14,8 @@ speeds:
   out per-brand baselines, and rebuilds the website.
 
 No servers, no database service, no running costs: **GitHub Actions** does the
-work, a **SQLite file in the repo** stores the history, and the site is served
-from **GitHub Pages**.
+work, a **SQLite file on its own git branch** stores the history, and the site is
+served from **GitHub Pages**.
 
 ## Instant alerts
 
@@ -182,13 +182,26 @@ then does its own precise timing internally for 5h45m. A new run cancels the
 incumbent, so scheduling delay shifts the handover rather than leaving a gap.
 
 **Why the poller never commits the database.** `data/vinted.db` is tens of
-megabytes and committed to git. Writing it every 60 seconds would bloat the repo
-without bound. The poller keeps a small, disposable state file in the Actions
-cache instead; the daily job folds its alert log *and the listings themselves*
-into the committed DB — the latter matters because a listing that appears and
-sells between daily scrapes would otherwise have no title or photo to display.
+megabytes. Writing it every 60 seconds would bloat the repo without bound. The
+poller keeps a small, disposable state file in the Actions cache instead; the
+daily job folds its alert log *and the listings themselves* into the database —
+the latter matters because a listing that appears and sells between daily
+scrapes would otherwise have no title or photo to display.
 
 The only thing the poller pushes is the feed, and only to its own orphan branch.
+
+**Where the database lives.** On its own single-commit branch (`db-snapshot`),
+not in `main`'s history. It used to be committed on every daily run, which added
+a fresh multi-megabyte blob per run and took `.git` past 260 MB. The daily job
+fetches it before scraping and force-pushes it back afterwards
+(`python -m scripts.db_snapshot pull` / `push`), so only the current copy is ever
+stored. Note this stops the growth rather than reversing it: the blobs already in
+`main`'s history stay there unless that history is rewritten.
+
+Two sizes bound it. `prune_items_days` deletes listings that are gone and were
+never alerted — without it the file grew ~2 MB a day forever, and git refuses a
+push above 100 MB. `window_days` bounds the price observations. Together they
+settle the file at roughly 30 MB.
 
 ## Setup
 
@@ -232,12 +245,9 @@ brands:
     search: "Arc'teryx"      # only needed if the display name differs from the key
     threshold: 0.35          # optional per-brand override
     rrp:                     # optional retail prices, used as a fallback baseline
-      mens_outerwear: 250
+      2052: 250              # keyed by Vinted catalog id
   the_north_face:
     id: 2319                 # optional: pin a known id (skips resolution / used as fallback)
-
-categories:
-  mens_outerwear: 2052       # category ids are still read from a Vinted URL (see below)
 ```
 
 If a name can't be resolved, the run logs it and skips that brand (falling back to
@@ -246,13 +256,12 @@ brand search URL on [vinted.co.uk](https://www.vinted.co.uk).
 
 ### Categories, sizes and quality
 
-**Categories** are identified by **Vinted catalog `id`**, with the human-readable
-title in a trailing comment:
+**Categories** are identified by **Vinted catalog `id`**:
 
 ```yaml
 categories:
-  - {id: 2052, gender: men, type: clothes, name: men_jackets}        # Jackets
-  - {id: 2678, gender: men, type: shoes,   name: men_hiking_boots}   # Hiking boots & shoes
+  - {id: 2052, gender: men, type: clothes, label: "Jackets"}
+  - {id: 2678, gender: men, type: shoes,   label: "Hiking boots & shoes"}
 ```
 
 By id rather than title, because Vinted's tree contains genuine duplicate
@@ -263,11 +272,12 @@ so a title lookup can silently bind to the wrong node. To find ids:
 python -m scripts.list_categories        # dumps the men's tree; pass "Women" etc. for others
 ```
 
-`name` is the **database key**, not a display name: it appears in
-`items.category`, `deals.category` and `baselines.category`, so renaming one
-orphans that category's accumulated price history. Duplicate ids and duplicate
-names are both rejected at load time — each would otherwise fail silently, one
-by wasting a rotation slot, the other by merging two categories' history.
+`label` is shown to humans and nothing else — log lines and error messages. The
+database keys every category by `id` (`items.catalog_id`,
+`price_observations.catalog_id`, `baselines`, `deals`), so relabelling one is
+free. A duplicate `id` is rejected at load time, because it would silently waste
+a rotation slot re-reading listings we already have; a duplicate `label` is
+allowed, since it is only cosmetic.
 
 **Sizes** are an allow-list per gender + type; anything else is hidden. Matching
 is strict and type-aware (shoes read the UK number, trousers read the waist,
@@ -330,11 +340,14 @@ src/run.py         daily orchestrator
 scripts/probe_api.py     verifies the API still returns what the poller needs
 scripts/preview_site.py  renders the site with sample data, for design review
 tests/             pytest suite (no network required)
-data/vinted.db     committed SQLite (source of truth)
+src/orphan_branch.py  single-commit branch plumbing, shared by the two below
+scripts/db_snapshot.py   moves the database on and off its branch
+data/vinted.db     SQLite (source of truth) — not in git; see `db-snapshot`
 data/hot.db        poller working state — gitignored, lives in the Actions cache
 docs/              generated site (GitHub Pages source)
-.github/workflows/ daily.yml, poller.yml, tests.yml
-(branch `hot-feed`)  the live JSON feed — one commit, force-pushed
+.github/workflows/ daily.yml, poller.yml, publish-site.yml, tests.yml
+(branch `hot-feed`)    the live JSON feed — one commit, force-pushed
+(branch `db-snapshot`) the SQLite database — one commit, force-pushed
 ```
 
 ## Caveats & legal

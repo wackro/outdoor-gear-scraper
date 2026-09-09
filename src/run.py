@@ -55,7 +55,7 @@ def scrape(
         try:
             items = client.fetch_items(all_brand_ids, catalog_id)
         except VintedError as exc:
-            log.error("Scrape failed for %s: %s", category.name, exc)
+            log.error("Scrape failed for %s: %s", category.label, exc)
             continue
         stored = 0
         for item in items:
@@ -63,13 +63,13 @@ def scrape(
             if brand_name is None:
                 continue  # brand not on our watchlist (shouldn't happen given the filter)
             db.upsert_item(
-                item, brand=brand_name, category=category.name, catalog_id=catalog_id,
+                item, brand=brand_name, catalog_id=catalog_id,
                 gender=category.gender, garment_type=category.type,
             )
-            db.add_observation(item, brand=brand_name, category=category.name)
+            db.add_observation(item, brand=brand_name, catalog_id=catalog_id)
             stored += 1
         total += stored
-        log.info("%s: %d items", category.name, stored)
+        log.info("%s: %d items", category.label, stored)
         client.throttle()  # polite pause between queries
     return total
 
@@ -141,11 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         # lives in a throwaway cache, so this is what makes dedup survive a cache
         # miss instead of re-notifying on everything still listed.
         merged = db.merge_alerts(DEFAULT_HOT_DB)
+        # After rebuild_deals, never before: `deals` still holds the previous
+        # run's rows until then, and they have a foreign key into `items`.
+        # Also after merge_alerts, so items alerted by the poller are protected.
+        dead = db.prune_items(config.deals.prune_items_days)
         db.commit()
+        reclaimed = db.vacuum() if dead else 0
         log.info(
             "Stored %d items, marked %d stale, pruned %d observations, "
-            "flagged %d deals, merged %d alerts.",
-            total, stale, pruned, deal_count, merged,
+            "flagged %d deals, merged %d alerts, deleted %d dead listings "
+            "(reclaimed %.1f MB).",
+            total, stale, pruned, deal_count, merged, dead, reclaimed / 1e6,
         )
 
         render_site(

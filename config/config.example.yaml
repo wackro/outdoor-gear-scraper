@@ -16,8 +16,13 @@ scrape:
 deals:
   threshold: 0.30           # flag when price <= median * (1 - threshold)
   min_samples: 8
-  window_days: 90
-  stale_days: 5
+  window_days: 90            # observations older than this stop feeding baselines
+  stale_days: 5              # unseen for this long -> marked inactive
+  prune_items_days: 7        # ...and this long -> deleted outright. The only
+                             # thing bounding the DB file, which is committed to
+                             # git and hard-fails above 100 MB. Observations
+                             # survive, so baselines are unaffected; alerted
+                             # listings are never pruned.
 
 quality:
   floor: Good               # hide anything below this condition
@@ -112,27 +117,26 @@ alerts:
 # silently bind to the wrong node. `python -m scripts.list_categories` dumps the
 # full tree with ids.
 #
-# `name` is the database key, not a display name. It appears in items.category,
-# deals.category and baselines.category, so renaming one orphans that category's
-# accumulated price history. The Vinted title is in the trailing comment.
+# `label` is only ever displayed -- in log lines and error messages. The database
+# keys categories by `id`, so relabelling one is free and affects nothing.
 categories:
-  - {id: 2052, gender: men, type: clothes,  name: men_jackets             }  # Jackets
-  - {id:   79, gender: men, type: clothes,  name: men_jumpers_&_sweaters  }  # Jumpers & sweaters
-  - {id:   34, gender: men, type: trousers, name: men_trousers            }  # Trousers
-  - {id: 1231, gender: men, type: shoes,    name: men_shoes               }  # Shoes
-  - {id:   94, gender: men, type: bags,     name: men_bags_&_backpacks    }  # Bags & backpacks
-  - {id: 1858, gender: men, type: clothes,  name: men_fleece_jackets      }  # Fleece jackets
-  - {id: 2536, gender: men, type: clothes,  name: men_puffer_jackets      }  # Puffer jackets
-  - {id: 1859, gender: men, type: clothes,  name: men_raincoats           }  # Raincoats
-  - {id: 2551, gender: men, type: clothes,  name: men_windbreakers        }  # Windbreakers
-  - {id: 2553, gender: men, type: clothes,  name: men_gilets              }  # Gilets & body warmers
-  - {id: 2539, gender: men, type: clothes,  name: men_ski_jackets         }  # Ski & snowboard jackets
-  - {id:  267, gender: men, type: clothes,  name: men_hoodies             }  # Hoodies & sweaters
-  - {id:  585, gender: men, type: clothes,  name: men_pullovers           }  # Pullovers & sweaters
-  - {id: 2678, gender: men, type: shoes,    name: men_hiking_boots        }  # Hiking boots & shoes
-  - {id: 1453, gender: men, type: shoes,    name: men_running_shoes       }  # Running shoes
-  - {id: 2673, gender: men, type: shoes,    name: men_climbing_shoes      }  # Climbing & bouldering shoes
-  - {id:  246, gender: men, type: bags,     name: men_backpacks           }  # Backpacks
+  - {id: 2052, gender: men, type: clothes,  label: "Jackets"                   }
+  - {id:   79, gender: men, type: clothes,  label: "Jumpers & sweaters"        }
+  - {id:   34, gender: men, type: trousers, label: "Trousers"                  }
+  - {id: 1231, gender: men, type: shoes,    label: "Shoes"                     }
+  - {id:   94, gender: men, type: bags,     label: "Bags & backpacks"          }
+  - {id: 1858, gender: men, type: clothes,  label: "Fleece jackets"            }
+  - {id: 2536, gender: men, type: clothes,  label: "Puffer jackets"            }
+  - {id: 1859, gender: men, type: clothes,  label: "Raincoats"                 }
+  - {id: 2551, gender: men, type: clothes,  label: "Windbreakers"              }
+  - {id: 2553, gender: men, type: clothes,  label: "Gilets & body warmers"     }
+  - {id: 2539, gender: men, type: clothes,  label: "Ski & snowboard jackets"   }
+  - {id:  267, gender: men, type: clothes,  label: "Hoodies & sweaters"        }
+  - {id:  585, gender: men, type: clothes,  label: "Pullovers & sweaters"      }
+  - {id: 2678, gender: men, type: shoes,    label: "Hiking boots & shoes"      }
+  - {id: 1453, gender: men, type: shoes,    label: "Running shoes"             }
+  - {id: 2673, gender: men, type: shoes,    label: "Climbing & bouldering shoes"}
+  - {id:  246, gender: men, type: bags,     label: "Backpacks"                 }
 
 # Brands to watch (resolved by name; add a `search` when the display name differs
 # from the key, e.g. accents). Unresolved brands are logged and skipped.

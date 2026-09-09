@@ -9,7 +9,52 @@ from pathlib import Path
 from ..vinted.models import VintedItem
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
+INDEX_PATH = Path(__file__).resolve().parent / "indexes.sql"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "vinted.db"
+
+SCHEMA_VERSION = 2
+
+# Every category name this database has ever stored, and the Vinted catalog id it
+# means. Frozen as a literal on purpose.
+#
+# Categories used to be keyed by this name; they are keyed by `catalog_id` now,
+# and re-keying the history needs exactly these pairs. Deriving them from
+# `items` at migration time very nearly works -- the mapping is 1:1 in both
+# directions, verified across all 26 -- but it is quietly time-dependent: a
+# retired category's listings all go inactive, `prune_items` then deletes them,
+# and its mapping disappears with them. The backfill would write NULL and no
+# test would notice. Written down, it cannot rot.
+#
+# Nine of these are retired (the women's categories, jeans, t-shirts) and are not
+# in config.yaml at all, which is the other reason config cannot be the source.
+HISTORICAL_CATALOG_IDS = {
+    "men_backpacks": 246,
+    "men_bags_&_backpacks": 94,
+    "men_climbing_shoes": 2673,
+    "men_fleece_jackets": 1858,
+    "men_gilets": 2553,
+    "men_hiking_boots": 2678,
+    "men_hoodies": 267,
+    "men_jackets": 2052,
+    "men_jeans": 257,
+    "men_jumpers_&_sweaters": 79,
+    "men_puffer_jackets": 2536,
+    "men_pullovers": 585,
+    "men_raincoats": 1859,
+    "men_running_shoes": 1453,
+    "men_shoes": 1231,
+    "men_ski_jackets": 2539,
+    "men_tops_&_t-shirts": 76,
+    "men_trousers": 34,
+    "men_windbreakers": 2551,
+    "women_bags": 19,
+    "women_jackets": 1908,
+    "women_jeans": 183,
+    "women_jumpers_&_hoodies": 1917,
+    "women_shoes": 16,
+    "women_tops_&_t-shirts": 12,
+    "women_trousers,_shorts_&_dungarees": 573,
+}
 
 
 def _utc_now_iso() -> str:
@@ -19,7 +64,7 @@ def _utc_now_iso() -> str:
 @dataclass(frozen=True)
 class Observation:
     brand: str
-    category: str
+    catalog_id: int
     price: float
 
 
@@ -40,8 +85,12 @@ class Database:
             self._init_schema()
 
     def _init_schema(self) -> None:
+        # Tables, then migrations, then indexes -- in that order. The indexes
+        # name columns the migrations add, so building them alongside the tables
+        # fails on any database old enough to still need migrating.
         self.conn.executescript(SCHEMA_PATH.read_text())
         self._migrate()
+        self.conn.executescript(INDEX_PATH.read_text())
         self.conn.commit()
 
     def _migrate(self) -> None:
@@ -50,6 +99,10 @@ class Database:
         have = {row["name"] for row in self.conn.execute("PRAGMA table_info(items)")}
         for col, decl in (
             ("gender", "TEXT"), ("garment_type", "TEXT"), ("condition", "TEXT"),
+            # Only ever reached a database created after it was added to
+            # schema.sql; older files never grew it, which is the gap the
+            # catalog-id migration below then has to fill.
+            ("catalog_id", "INTEGER"),
             # Attention counters, added for the hotness poller. Recorded on the
             # daily scrape too, so the site can show them and so there is a
             # historical record to calibrate the alert thresholds against.
@@ -64,6 +117,139 @@ class Database:
             if col not in have_alerted:
                 self.conn.execute(f"ALTER TABLE alerted ADD COLUMN {col} {decl}")
 
+        if self._version() < 1:
+            self._key_categories_by_id()
+            self._set_version(1)
+
+        if self._version() < 2:
+            self._drop_category_names()
+            self._set_version(2)
+
+    def _version(self) -> int:
+        return self.conn.execute("PRAGMA user_version").fetchone()[0]
+
+    def _set_version(self, version: int) -> None:
+        # Not parameterisable; the value is ours, not user input.
+        self.conn.execute(f"PRAGMA user_version = {int(version)}")
+
+    def _catalog_id_map(self) -> dict[str, int]:
+        """name -> catalog id, for backfilling history.
+
+        `HISTORICAL_CATALOG_IDS` is the frozen record and wins where it applies.
+        Anything this database has learned since is read out of `items`, so a
+        category added between that literal being written and this migration
+        running still resolves. Where both know a name they must agree.
+        """
+        items_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(items)")}
+        derived = {}
+        if "category" in items_columns:
+            derived = {
+                row["category"]: row["catalog_id"]
+                for row in self.conn.execute(
+                    "SELECT category, catalog_id FROM items "
+                    "WHERE catalog_id IS NOT NULL GROUP BY category"
+                )
+            }
+        for name, catalog_id in HISTORICAL_CATALOG_IDS.items():
+            if name in derived and derived[name] != catalog_id:
+                raise RuntimeError(
+                    f"Category {name!r} is id {derived[name]} in items but "
+                    f"{catalog_id} in HISTORICAL_CATALOG_IDS. One is wrong; "
+                    f"re-keying on either would corrupt that category's history."
+                )
+        return {**derived, **HISTORICAL_CATALOG_IDS}
+
+    def _key_categories_by_id(self) -> None:
+        """Give `price_observations` a catalog id, and fill the gaps in `items`.
+
+        Every step is guarded or idempotent and the version is only bumped once
+        they have all succeeded, so an interruption leaves a database this will
+        simply redo -- which beats a transaction whose rollback journal would
+        have to hold a rewrite of the largest table in the file.
+
+        The backfill maps `price_observations.category`, and deliberately does
+        **not** join `item_id` to `items.catalog_id`. That join looks obviously
+        right and is wrong: `upsert_item` never updates `category` on conflict, so
+        `items` records where a listing was *first* seen, while thousands of
+        listings have been observed under more than one category. Joining would
+        silently move those observations into a category they were never seen in,
+        shifting the baselines that decide what counts as a bargain.
+        """
+        have = {row["name"] for row in self.conn.execute(
+            "PRAGMA table_info(price_observations)")}
+        if "catalog_id" not in have:
+            self.conn.execute("ALTER TABLE price_observations ADD COLUMN catalog_id INTEGER")
+
+        # A database created from the current schema has no name column to read,
+        # so there is nothing to translate. This runs on new files too, because
+        # user_version starts at zero for them as well.
+        stale = [t for t in ("price_observations", "items")
+                 if "category" in {row[1] for row in
+                                   self.conn.execute(f"PRAGMA table_info({t})")}]
+        if not stale:
+            return
+
+        mapping = self._catalog_id_map()
+        for table in stale:
+            names = [row[0] for row in self.conn.execute(
+                f"SELECT DISTINCT category FROM {table} WHERE catalog_id IS NULL")]
+            unknown = [n for n in names if n not in mapping]
+            if unknown:
+                raise RuntimeError(
+                    f"No catalog id known for {unknown!r} in {table}. Add them to "
+                    f"HISTORICAL_CATALOG_IDS; guessing would silently merge one "
+                    f"category's price history into another."
+                )
+            self.conn.executemany(
+                f"UPDATE {table} SET catalog_id = ? "
+                f"WHERE category = ? AND catalog_id IS NULL",
+                [(mapping[n], n) for n in names],
+            )
+
+    def _drop_category_names(self) -> None:
+        """Retire the category name columns; `catalog_id` is the key now.
+
+        Dropping them is not just tidiness. `items.category` was NOT NULL, and
+        the poller has no name to supply -- it knows only the catalog id -- so
+        while the column existed every listing merged from the poller needed a
+        name invented for it.
+
+        `baselines` and `deals` are wholly recomputed on every run
+        (`replace_baselines` and `replace_deals` each begin with a DELETE), so
+        there is nothing in them worth converting; dropping and letting the
+        schema script rebuild them keeps schema.sql the single definition of
+        their shape. `baselines` could not be converted in place regardless --
+        its primary key is part of what changed, and SQLite cannot alter one.
+
+        `ALTER TABLE ... DROP COLUMN` refuses a column an index mentions, hence
+        dropping each index and recreating it on `catalog_id`. That also rebuilds
+        both indexes around a 2-byte integer instead of an average 17-byte
+        string.
+        """
+        for table, index, columns in (
+            ("items", "idx_items_brand_cat", "brand, catalog_id"),
+            ("price_observations", "idx_obs_bracket", "brand, catalog_id, observed"),
+        ):
+            present = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "category" not in present:
+                continue
+            orphans = self.conn.execute(
+                f"SELECT count(*) FROM {table} WHERE catalog_id IS NULL"
+            ).fetchone()[0]
+            if orphans:
+                raise RuntimeError(
+                    f"{orphans} rows in {table} still have no catalog_id. Dropping "
+                    f"`category` now would destroy the only record of which "
+                    f"category they belong to."
+                )
+            self.conn.execute(f"DROP INDEX IF EXISTS {index}")
+            self.conn.execute(f"ALTER TABLE {table} DROP COLUMN category")
+            self.conn.execute(f"CREATE INDEX IF NOT EXISTS {index} ON {table}({columns})")
+
+        self.conn.execute("DROP TABLE IF EXISTS baselines")
+        self.conn.execute("DROP TABLE IF EXISTS deals")
+        self.conn.executescript(SCHEMA_PATH.read_text())   # recreates them empty
+
     def close(self) -> None:
         self.conn.close()
 
@@ -76,18 +262,18 @@ class Database:
     # -- items & observations ------------------------------------------------
 
     def upsert_item(
-        self, item: VintedItem, *, brand: str, category: str, catalog_id: int,
+        self, item: VintedItem, *, brand: str, catalog_id: int,
         gender: str, garment_type: str,
     ) -> None:
         """Insert a new item or refresh an existing one's price/last_seen."""
         now = _utc_now_iso()
         self.conn.execute(
             """
-            INSERT INTO items (id, brand, brand_title, category, catalog_id, gender,
+            INSERT INTO items (id, brand, brand_title, catalog_id, gender,
                                garment_type, title, price, currency, size, condition,
                                url, image_url, first_seen, last_seen, active,
                                favourite_count, view_count, listed_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 price           = excluded.price,
                 size            = excluded.size,
@@ -100,20 +286,23 @@ class Database:
                 listed_ts       = COALESCE(items.listed_ts, excluded.listed_ts)
             """,
             (
-                item.id, brand, item.brand_title, category, catalog_id, gender,
+                item.id, brand, item.brand_title, catalog_id, gender,
                 garment_type, item.title, item.price, item.currency or "GBP", item.size,
                 item.condition, item.url, item.image_url, now, now,
                 item.favourite_count, item.view_count, item.listed_ts,
             ),
         )
 
-    def add_observation(self, item: VintedItem, *, brand: str, category: str) -> None:
+    def add_observation(
+        self, item: VintedItem, *, brand: str, catalog_id: int,
+    ) -> None:
         self.conn.execute(
             """
-            INSERT INTO price_observations (item_id, brand, category, price, observed)
+            INSERT INTO price_observations
+                   (item_id, brand, catalog_id, price, observed)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (item.id, brand, category, item.price, _utc_now_iso()),
+            (item.id, brand, catalog_id, item.price, _utc_now_iso()),
         )
 
     def mark_stale_items(self, stale_days: int) -> int:
@@ -136,6 +325,58 @@ class Database:
         )
         return cur.rowcount
 
+    def prune_items(self, keep_days: int) -> int:
+        """Delete listings that are gone and were never hot. Returns rows deleted.
+
+        This is the only thing bounding the file's size. `mark_stale_items` merely
+        flips `active`, observations are pruned on their own much longer window,
+        and the file is committed to git -- which hard-fails above 100 MB.
+
+        Dropping these rows costs nothing analytically:
+
+        - baselines are computed from `price_observations` alone, which carries
+          its own brand/price and never joins `items` (see `observations_within`),
+          so every baseline survives untouched
+        - deal detection only ever reads `active_items()`
+
+        The two exclusions are both load-bearing. Alerted items are the site's
+        sold / time-to-sell history (`alerted JOIN items` in the site generator)
+        and a good many of them are already inactive, so pruning them would erase
+        what the page shows. `keep_days` is the grace period for a relisted item
+        to come back before we forget it.
+
+        **Call this after `replace_deals`, not before.** `deals.item_id`
+        REFERENCES `items(id)` and foreign keys are on, so while `deals` still
+        holds the previous run's rows a delete here can hit an item that run had
+        flagged and this one has just marked inactive.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).replace(
+            microsecond=0
+        ).isoformat()
+        cur = self.conn.execute(
+            """
+            DELETE FROM items
+            WHERE active = 0
+              AND last_seen < ?
+              AND id NOT IN (SELECT item_id FROM alerted)
+            """,
+            (cutoff,),
+        )
+        return cur.rowcount
+
+    def vacuum(self) -> int:
+        """Repack the file, returning the bytes reclaimed.
+
+        Worth doing only after a prune. Deleting rows leaves the pages allocated
+        and partially filled -- `freelist_count` stays near zero and the file
+        never shrinks -- so without this the prune frees nothing on disk. VACUUM
+        cannot run inside a transaction, hence the commit first.
+        """
+        self.conn.commit()
+        before = self.path.stat().st_size
+        self.conn.execute("VACUUM")
+        return before - self.path.stat().st_size
+
     # -- baselines -----------------------------------------------------------
 
     def observations_within(self, window_days: int) -> list[Observation]:
@@ -143,17 +384,19 @@ class Database:
             microsecond=0
         ).isoformat()
         rows = self.conn.execute(
-            "SELECT brand, category, price FROM price_observations WHERE observed >= ?",
+            "SELECT brand, catalog_id, price FROM price_observations "
+            "WHERE observed >= ?",
             (cutoff,),
         ).fetchall()
-        return [Observation(r["brand"], r["category"], r["price"]) for r in rows]
+        return [Observation(r["brand"], r["catalog_id"], r["price"]) for r in rows]
 
-    def replace_baselines(self, baselines: list[tuple[str, str, float, float, int]]) -> None:
+    def replace_baselines(self, baselines: list[tuple[str, int, float, float, int]]) -> None:
         now = _utc_now_iso()
         self.conn.execute("DELETE FROM baselines")
         self.conn.executemany(
             """
-            INSERT INTO baselines (brand, category, median, mad, sample_size, computed_at)
+            INSERT INTO baselines (brand, catalog_id, median, mad, sample_size,
+                                   computed_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             [(b, c, med, mad, n, now) for (b, c, med, mad, n) in baselines],
@@ -169,26 +412,13 @@ class Database:
         self.conn.execute("DELETE FROM deals")
         self.conn.executemany(
             """
-            INSERT INTO deals (item_id, brand, category, price, baseline, baseline_src,
-                               discount_pct, deal_score, flagged_at)
-            VALUES (:item_id, :brand, :category, :price, :baseline, :baseline_src,
-                    :discount_pct, :deal_score, :flagged_at)
+            INSERT INTO deals (item_id, brand, catalog_id, price, baseline,
+                               baseline_src, discount_pct, deal_score, flagged_at)
+            VALUES (:item_id, :brand, :catalog_id, :price, :baseline,
+                    :baseline_src, :discount_pct, :deal_score, :flagged_at)
             """,
             [{**d, "flagged_at": now} for d in deals],
         )
-
-    def deals_for_site(self) -> list[sqlite3.Row]:
-        """Deals joined with their item details, best discount first."""
-        return self.conn.execute(
-            """
-            SELECT d.*, i.title, i.brand_title, i.gender, i.garment_type, i.size,
-                   i.condition, i.url, i.image_url, i.first_seen, i.last_seen
-            FROM deals d
-            JOIN items i ON i.id = d.item_id
-            WHERE i.active = 1
-            ORDER BY d.discount_pct DESC
-            """
-        ).fetchall()
 
     def merge_alerts(self, hot_db_path: str | Path) -> int:
         """Copy the poller's alert log — and the listings themselves — into the DB.
@@ -203,7 +433,7 @@ class Database:
            the listings this system exists to catch.
 
         Scraped rows always win over poller rows where both exist — the daily
-        scrape carries `catalog_id` and price history the poller never sees.
+        scrape carries price history the poller never sees.
         """
         hot_path = Path(hot_db_path)
         if not hot_path.exists():
@@ -214,11 +444,11 @@ class Database:
             # join against.
             self.conn.execute(
                 """
-                INSERT INTO items (id, brand, brand_title, category, gender,
+                INSERT INTO items (id, brand, brand_title, catalog_id, gender,
                                    garment_type, title, price, currency, size,
                                    condition, url, image_url, first_seen, last_seen,
                                    active, listed_ts)
-                SELECT m.item_id, m.brand, m.brand_title, m.category, m.gender,
+                SELECT m.item_id, m.brand, m.brand_title, m.catalog_id, m.gender,
                        m.garment_type, m.title, m.price, m.currency, m.size,
                        m.condition, m.url, m.image_url,
                        strftime('%Y-%m-%dT%H:%M:%S+00:00', m.first_seen, 'unixepoch'),

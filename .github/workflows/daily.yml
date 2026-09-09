@@ -53,9 +53,23 @@ jobs:
             data/hot.db
             data/hot.db-wal
             data/hot.db-shm
-          key: hot-state-
+          # Must match poller.yml's prefix, including its version. Restoring a
+          # pre-catalog_id hot.db here would break the alert merge, which reads
+          # item_meta.catalog_id.
+          key: hot-state-v2-
           restore-keys: |
-            hot-state-
+            hot-state-v2-
+
+      - name: Configure git
+        run: |
+          git config user.name "deals-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Not continue-on-error: without a database the scrape would create an
+      # empty one and write it over everything collected so far. Failing here is
+      # the safe outcome.
+      - name: Fetch the database
+        run: python -m scripts.db_snapshot pull
 
       - name: Scrape and build site
         id: run
@@ -65,18 +79,12 @@ jobs:
         run: python -m src.run
         continue-on-error: true
 
-      - name: Commit data
+      # The database lives on its own single-commit branch rather than in main's
+      # history: it is rewritten daily and multi-megabyte, so committing it was
+      # adding a fresh blob per run and is what took .git past 260 MB.
+      - name: Store the database
         if: steps.run.outcome == 'success'
-        run: |
-          git config user.name "deals-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "chore: daily deals update $(date -u +%F)"
-            git push
-          fi
+        run: python -m scripts.db_snapshot push
 
       # Fails the job, which skips the publish below. That's intended: a failed
       # scrape leaves the DB untouched, so there is nothing new to deploy.
@@ -86,8 +94,12 @@ jobs:
           echo "::error::Scrape failed or returned no items — DB left untouched."
           exit 1
 
-  # Deploy the site from the commit the scrape just pushed. Reuses
-  # publish-site.yml so the deploy mechanism lives in exactly one place.
+  # Reuses publish-site.yml so the deploy mechanism lives in exactly one place.
+  #
+  # `needs: scrape` is what sequences this correctly, not the ref: the data comes
+  # from the db-snapshot branch the scrape job just pushed, so this no longer
+  # races a commit landing on main. `ref: main` is now only about which version
+  # of the page template gets rendered.
   publish:
     needs: scrape
     uses: ./.github/workflows/publish-site.yml

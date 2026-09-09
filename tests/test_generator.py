@@ -23,7 +23,7 @@ def add_alerted(db, item_id=1, *, sold=False):
                    url=f"https://vinted.co.uk/items/{item_id}", image_url="img",
                    favourite_count=20, view_count=300,
                    listed_ts=int(time.time() - 1800)),
-        brand="rab", category="men_jackets", catalog_id=2052,
+        brand="rab", catalog_id=2052,
         gender="men", garment_type="clothes",
     )
     db.conn.execute(
@@ -102,7 +102,7 @@ class TestRender:
             VintedItem(id=2, title="</script><script>alert(1)</script>",
                        price=10.0, currency="GBP", brand_title="Rab", size="M",
                        condition="Good", url="u", image_url="i"),
-            brand="rab", category="men_jackets", catalog_id=1,
+            brand="rab", catalog_id=1,
             gender="men", garment_type="clothes",
         )
         db.conn.execute(
@@ -232,33 +232,37 @@ class TestCategoryConfig:
         path.write_text(base[:start] + "categories:\n" + categories + base[end:])
         return path
 
-    def test_shipped_config_is_all_ids_with_unique_names(self):
+    def test_shipped_config_is_all_unique_ids(self):
         from src.config import load_config
         cats = load_config("config/config.yaml").categories
         assert all(c.id for c in cats)
         assert len({c.id for c in cats}) == len(cats)
-        assert len({c.name for c in cats}) == len(cats)
 
-    def test_database_keys_are_preserved(self):
-        """Renaming one orphans that category's accumulated price history."""
+    def test_the_database_keys_are_preserved(self):
+        """The ids are what price history hangs off, so they must not drift.
+
+        This replaces an assertion on five category *names*, which stopped being
+        load-bearing when the database moved to catalog ids -- names are now only
+        ever printed in log lines.
+        """
         from src.config import load_config
-        names = {c.name for c in load_config("config/config.yaml").categories}
-        for key in ("men_jackets", "men_jumpers_&_sweaters", "men_trousers",
-                    "men_shoes", "men_bags_&_backpacks"):
-            assert key in names, f"{key} would orphan its baselines"
+        ids = {c.id for c in load_config("config/config.yaml").categories}
+        for key in (2052, 79, 34, 1231, 94):
+            assert key in ids, f"catalog {key} would orphan its baselines"
 
     def test_a_missing_id_is_rejected(self, tmp_path):
         import pytest
         from src.config import load_config
-        path = self._write(tmp_path, "  - {gender: men, type: clothes, name: men_x}\n")
+        path = self._write(tmp_path, '  - {gender: men, type: clothes, label: "X"}\n')
         with pytest.raises(ValueError, match="needs an `id`"):
             load_config(path)
 
-    def test_a_missing_name_is_rejected(self, tmp_path):
+    def test_a_missing_label_is_rejected(self, tmp_path):
+        """Only so logs stay readable -- nothing downstream depends on it."""
         import pytest
         from src.config import load_config
         path = self._write(tmp_path, "  - {id: 1, gender: men, type: clothes}\n")
-        with pytest.raises(ValueError, match="needs a `name`"):
+        with pytest.raises(ValueError, match="needs a `label`"):
             load_config(path)
 
     def test_a_duplicate_id_is_rejected(self, tmp_path):
@@ -266,20 +270,26 @@ class TestCategoryConfig:
         import pytest
         from src.config import load_config
         path = self._write(tmp_path,
-            "  - {id: 1, gender: men, type: clothes, name: men_a}\n"
-            "  - {id: 1, gender: men, type: clothes, name: men_b}\n")
+            '  - {id: 1, gender: men, type: clothes, label: "A"}\n'
+            '  - {id: 1, gender: men, type: clothes, label: "B"}\n')
         with pytest.raises(ValueError, match="Duplicate category id 1"):
             load_config(path)
 
-    def test_a_duplicate_name_is_rejected(self, tmp_path):
-        # Silent otherwise: two categories' price history merges into one bracket.
-        import pytest
+    def test_a_duplicate_label_is_allowed(self, tmp_path):
+        """It is only a log line now.
+
+        This used to be rejected, and had to be: the label was the database key,
+        so two categories sharing one merged their price history into a single
+        bracket. Keying on the catalog id retired that whole failure mode, and
+        this test is here to say so rather than to defend the behaviour.
+        """
         from src.config import load_config
         path = self._write(tmp_path,
-            "  - {id: 1, gender: men, type: clothes, name: men_a}\n"
-            "  - {id: 2, gender: men, type: clothes, name: men_a}\n")
-        with pytest.raises(ValueError, match="Duplicate category name"):
-            load_config(path)
+            '  - {id: 1, gender: men, type: clothes, label: "Jackets"}\n'
+            '  - {id: 2, gender: men, type: clothes, label: "Jackets"}\n')
+        cats = load_config(path).categories
+        assert [c.id for c in cats] == [1, 2]
+        assert {c.label for c in cats} == {"Jackets"}
 
 
 class TestRotation:

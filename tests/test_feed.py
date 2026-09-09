@@ -37,7 +37,7 @@ def item(item_id=1, *, favourites=0, price=30.0, size="M", condition="Very good"
 
 
 def track(state, it, *, minutes_ago):
-    state.record(it, brand="rab", category="men_jackets", gender="men",
+    state.record(it, brand="rab", catalog_id=2052, gender="men",
                  garment_type="clothes", now=NOW - minutes_ago * 60)
     state.commit()
 
@@ -96,7 +96,7 @@ class TestBuildFeed:
 
     def test_discount_computed_against_the_baseline(self, state, config):
         warm(state, 1, price=25.0)
-        baselines = BaselineLookup({("rab", "men_jackets"): (100.0, 50)})
+        baselines = BaselineLookup({("rab", 2052): (100.0, 50)})
         entry = build_feed(state, config, BAR, baselines, now=NOW)["items"][0]
         assert entry["discount_pct"] == pytest.approx(0.75)
 

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS item_meta (
     item_id      INTEGER PRIMARY KEY,
     brand        TEXT,                -- normalized config key, e.g. the_north_face
     brand_title  TEXT,                -- Vinted's display name, e.g. The North Face
-    category     TEXT,
+    catalog_id   INTEGER,       -- Vinted catalog id; the category key
     gender       TEXT,
     garment_type TEXT,
     title        TEXT,
@@ -106,7 +106,7 @@ class HotState:
         item: VintedItem,
         *,
         brand: str,
-        category: str,
+        catalog_id: int,
         gender: str,
         garment_type: str,
         now: float,
@@ -118,7 +118,7 @@ class HotState:
         """
         self.conn.execute(
             """
-            INSERT INTO item_meta (item_id, brand, brand_title, category, gender,
+            INSERT INTO item_meta (item_id, brand, brand_title, catalog_id, gender,
                                    garment_type, title, price, currency, size,
                                    condition, url, image_url, promoted, listed_ts,
                                    first_seen, last_seen)
@@ -133,7 +133,7 @@ class HotState:
                 gone_at   = NULL          -- it's back on the page; it hadn't sold
             """,
             (
-                item.id, brand, item.brand_title, category, gender, garment_type,
+                item.id, brand, item.brand_title, catalog_id, gender, garment_type,
                 item.title, item.price, item.currency or "GBP", item.size,
                 item.condition, item.url, item.image_url, int(item.promoted),
                 item.listed_ts, now, now,
@@ -149,13 +149,13 @@ class HotState:
             (item.id, now, item.favourite_count, item.view_count),
         )
 
-    def tracked_in_category(self, category: str, since: float) -> list:
+    def tracked_in_category(self, catalog_id: int, since: float) -> list:
         """Live listings we're watching in one category, for sold detection."""
         from .sold import Tracked
         rows = self.conn.execute(
             "SELECT item_id, listed_ts FROM item_meta "
-            "WHERE category = ? AND gone_at IS NULL AND last_seen >= ?",
-            (category, since),
+            "WHERE catalog_id = ? AND gone_at IS NULL AND last_seen >= ?",
+            (catalog_id, since),
         ).fetchall()
         return [Tracked(r["item_id"], r["listed_ts"]) for r in rows]
 
@@ -284,8 +284,15 @@ class HotState:
         samples = self.conn.execute(
             "DELETE FROM item_samples WHERE observed < ?", (now - sample_hours * 3600,)
         ).rowcount
+        # Keep the metadata of anything we alerted on, even once it is older than
+        # the sample window. `alerts` is retained far longer than `item_meta`, so
+        # pruning on last_seen alone strands an alert with no title, photo or URL
+        # -- and the daily merge then copies that alert into the committed DB with
+        # no matching `items` row, leaving a listing the site can never render.
         self.conn.execute(
-            "DELETE FROM item_meta WHERE last_seen < ?", (now - sample_hours * 3600,)
+            "DELETE FROM item_meta WHERE last_seen < ? "
+            "AND item_id NOT IN (SELECT item_id FROM alerts)",
+            (now - sample_hours * 3600,),
         )
         cutoff_iso = datetime.fromtimestamp(
             now - alert_hours * 3600, tz=timezone.utc
