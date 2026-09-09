@@ -94,8 +94,12 @@ jobs:
           echo "::error::Scrape failed or returned no items — DB left untouched."
           exit 1
 
-  # Deploy the site from the commit the scrape just pushed. Reuses
-  # publish-site.yml so the deploy mechanism lives in exactly one place.
+  # Reuses publish-site.yml so the deploy mechanism lives in exactly one place.
+  #
+  # `needs: scrape` is what sequences this correctly, not the ref: the data comes
+  # from the db-snapshot branch the scrape job just pushed, so this no longer
+  # races a commit landing on main. `ref: main` is now only about which version
+  # of the page template gets rendered.
   publish:
     needs: scrape
     uses: ./.github/workflows/publish-site.yml
