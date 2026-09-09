@@ -35,9 +35,9 @@ def item(item_id=1, *, price=30.0, favourites=0, views=0, size="M",
 
 
 def track(state, it, *, minutes_ago, garment_type="clothes", gender="men",
-          category="men_jackets"):
+          catalog_id=2052):
     """Record one observation of a listing at a point in the past."""
-    state.record(it, brand="rab", category=category, gender=gender,
+    state.record(it, brand="rab", catalog_id=catalog_id, gender=gender,
                  garment_type=garment_type, now=NOW - minutes_ago * 60)
     state.commit()
 
@@ -118,12 +118,12 @@ class TestPriceVeto:
     def test_hot_but_full_price_is_rejected(self, state, config):
         # Popular at a fair price is not a bargain.
         hot_item(state, price=100.0)
-        baselines = BaselineLookup({("rab", "men_jackets"): (100.0, 50)})
+        baselines = BaselineLookup({("rab", 2052): (100.0, 50)})
         assert evaluate(state, config, BAR, baselines, now=NOW) == []
 
     def test_hot_and_cheap_passes_with_a_discount(self, state, config):
         hot_item(state, price=30.0)
-        baselines = BaselineLookup({("rab", "men_jackets"): (100.0, 50)})
+        baselines = BaselineLookup({("rab", 2052): (100.0, 50)})
         alerts = evaluate(state, config, BAR, baselines, now=NOW)
         assert len(alerts) == 1
         assert alerts[0].discount_pct == pytest.approx(0.7)
@@ -139,7 +139,7 @@ class TestPriceVeto:
     def test_urgent_only_when_hot_and_clearly_underpriced(self, state, config):
         hot_item(state, item_id=1, price=30.0)      # 70% off -> urgent
         hot_item(state, item_id=2, price=85.0)      # 15% off -> not urgent
-        baselines = BaselineLookup({("rab", "men_jackets"): (100.0, 50)})
+        baselines = BaselineLookup({("rab", 2052): (100.0, 50)})
         by_id = {a.item_id: a for a in
                  evaluate(state, config, BAR, baselines, now=NOW)}
         assert by_id[1].urgent

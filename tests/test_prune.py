@@ -30,7 +30,7 @@ def item(n):
 
 def store(db, n, *, active=1, days_ago=0):
     """Add an item, then age it -- upsert_item always stamps `now`."""
-    db.upsert_item(item(n), brand="rab", category="men_jackets", catalog_id=2052,
+    db.upsert_item(item(n), brand="rab", catalog_id=2052,
                    gender="men", garment_type="clothes")
     db.conn.execute(
         "UPDATE items SET active = ?, last_seen = datetime('now', ?) WHERE id = ?",
@@ -84,8 +84,7 @@ class TestPruneItems:
         """Baselines must not care. They read price_observations, which carries
         its own brand and price and never joins items."""
         store(db, 1, active=0, days_ago=30)
-        db.add_observation(item(1), brand="rab", category="men_jackets",
-                           catalog_id=2052)
+        db.add_observation(item(1), brand="rab", catalog_id=2052)
         db.commit()
 
         db.prune_items(7)
@@ -106,7 +105,7 @@ class TestPruneItems:
         """
         store(db, 1, active=0, days_ago=30)
         db.replace_deals([{
-            "item_id": 1, "brand": "rab", "category": "men_jackets",
+            "item_id": 1, "brand": "rab", "catalog_id": 2052,
             "price": 40.0, "baseline": 100.0, "baseline_src": "history",
             "discount_pct": 0.6, "deal_score": 3.0,
         }])
@@ -119,7 +118,7 @@ class TestPruneItems:
     def test_rebuilding_deals_first_makes_the_prune_safe(self, db):
         store(db, 1, active=0, days_ago=30)
         db.replace_deals([{
-            "item_id": 1, "brand": "rab", "category": "men_jackets",
+            "item_id": 1, "brand": "rab", "catalog_id": 2052,
             "price": 40.0, "baseline": 100.0, "baseline_src": "history",
             "discount_pct": 0.6, "deal_score": 3.0,
         }])

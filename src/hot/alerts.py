@@ -28,28 +28,44 @@ class BaselineLookup:
     observations every 60 seconds to produce a number that changes daily.
     """
 
-    def __init__(self, rows: dict[tuple[str, str], tuple[float, int]]):
+    def __init__(self, rows: dict[tuple[str, int], tuple[float, int]]):
         self._rows = rows
 
     @classmethod
     def from_db(cls, conn: sqlite3.Connection, min_samples: int) -> "BaselineLookup":
-        rows: dict[tuple[str, str], tuple[float, int]] = {}
+        rows: dict[tuple[str, int], tuple[float, int]] = {}
+
+        # Two very different reasons this can come back empty, and they used to
+        # look identical. An absent table is routine -- the daily job has not run
+        # yet -- but a table without `catalog_id` means this poller is older or
+        # newer than the database it is reading, and the only symptom would be
+        # the price veto quietly switching itself off. Say so.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(baselines)")}
+        if not columns:
+            log.warning("No baselines table yet; price sanity check disabled.")
+            return cls({})
+        if "catalog_id" not in columns:
+            log.error(
+                "Baselines table predates catalog ids (columns: %s). Price sanity "
+                "check disabled until the daily job rebuilds it.",
+                ", ".join(sorted(columns)),
+            )
+            return cls({})
+
         try:
             cursor = conn.execute(
-                "SELECT brand, category, median, sample_size FROM baselines"
+                "SELECT brand, catalog_id, median, sample_size FROM baselines"
             )
         except sqlite3.Error as exc:
-            # A missing table just means the daily job has not run yet. The price
-            # veto is optional, so degrade to "no baselines" rather than dying.
             log.warning("No baselines available (%s); price sanity check disabled.", exc)
             return cls({})
         for row in cursor:
             if row[2] and row[3] >= min_samples:
-                rows[(row[0], row[1])] = (float(row[2]), int(row[3]))
+                rows[(row[0], int(row[1]))] = (float(row[2]), int(row[3]))
         return cls(rows)
 
-    def median_for(self, brand: str, category: str) -> float | None:
-        entry = self._rows.get((brand, category))
+    def median_for(self, brand: str, catalog_id: int | None) -> float | None:
+        entry = self._rows.get((brand, catalog_id))
         return entry[0] if entry else None
 
     def __len__(self) -> int:
@@ -163,7 +179,7 @@ def evaluate(
         if price > cfg.max_price:
             continue
 
-        baseline = baselines.median_for(meta["brand"] or "", meta["category"] or "")
+        baseline = baselines.median_for(meta["brand"] or "", meta["catalog_id"])
         if baseline and price > baseline * (1 - cfg.sanity_discount):
             # Hot but not cheap. Popular at a fair price is not a bargain — this
             # is the veto that stops us alerting on every in-demand listing.

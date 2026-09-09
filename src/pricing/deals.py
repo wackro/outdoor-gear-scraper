@@ -26,7 +26,7 @@ def detect_deals(
     deals: list[dict] = []
     for item in items:
         brand = item["brand"]
-        category = item["category"]
+        catalog_id = item["catalog_id"]
         price = item["price"]
 
         # Quality floor and size allow-list gates.
@@ -36,7 +36,7 @@ def detect_deals(
         if not size_matches(item["garment_type"], item["size"] or "", allowed):
             continue
 
-        ref = provider.reference(brand, category)
+        ref = provider.reference(brand, catalog_id)
         if ref is None or ref.value <= 0:
             continue
 
@@ -56,7 +56,7 @@ def detect_deals(
             {
                 "item_id": item["id"],
                 "brand": brand,
-                "category": category,
+                "catalog_id": catalog_id,
                 "price": price,
                 "baseline": round(ref.value, 2),
                 "baseline_src": ref.source,

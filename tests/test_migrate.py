@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from src.storage.db import HISTORICAL_CATALOG_IDS, Database
+from src.storage.db import HISTORICAL_CATALOG_IDS, SCHEMA_VERSION, Database
 
 
 def old_shape(path, *, items=(), observations=()):
@@ -82,9 +82,11 @@ class TestBackfill:
             observations=[(1, "men_bags_&_backpacks"), (1, "women_bags")],
         )
         with Database(path) as db:
-            got = rows(db, "SELECT category, catalog_id FROM price_observations "
+            got = rows(db, "SELECT catalog_id FROM price_observations "
                            "ORDER BY catalog_id")
-        assert got == [("women_bags", 19), ("men_bags_&_backpacks", 94)]
+        # 19 is women_bags, 94 is men_bags_&_backpacks. A join on item_id would
+        # have produced [(94,), (94,)] -- `items` only knows the first sighting.
+        assert got == [(19,), (94,)]
 
     def test_items_missing_an_id_are_filled_in(self, tmp_path):
         """merge_alerts inserts poller rows without a catalog_id."""
@@ -131,10 +133,10 @@ class TestSafety:
     def test_the_migration_runs_once(self, tmp_path):
         path = old_shape(tmp_path / "v.db", observations=[(1, "men_jackets")])
         with Database(path) as db:
-            assert db._version() == 1
+            assert db._version() == SCHEMA_VERSION
         # Re-opening must not redo the work, and must not undo it either.
         with Database(path) as db:
-            assert db._version() == 1
+            assert db._version() == SCHEMA_VERSION
             assert rows(db, "SELECT catalog_id FROM price_observations") == [(2052,)]
 
     def test_an_interrupted_migration_is_redone(self, tmp_path):

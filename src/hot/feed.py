@@ -112,7 +112,7 @@ def build_feed(state, config: Config, bar, baselines, *, now: float,
 
         entries.append(_entry(
             meta, vel, score, samples[-1], age_minutes=age_minutes,
-            baseline=baselines.median_for(meta["brand"] or "", meta["category"] or ""),
+            baseline=baselines.median_for(meta["brand"] or "", meta["catalog_id"]),
             alerted=item_id in alerted,
             sold=bool(gone_at),
             seconds_to_sell=seconds_to_sell,

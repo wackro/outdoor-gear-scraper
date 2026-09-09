@@ -51,7 +51,7 @@ def test_carries_listing_metadata_the_daily_scrape_never_saw(tmp_path):
             url="https://vinted.co.uk/items/777", image_url="http://img/1.jpg",
             favourite_count=20, view_count=300, listed_ts=int(now - 1800),
         )
-        hot.record(listing, brand="the_north_face", category="men_jackets",
+        hot.record(listing, brand="the_north_face", catalog_id=2052,
                    gender="men", garment_type="clothes", now=now - 1700)
         hot.mark_alerted(777, heat=0.97, fav_rate=40.0, view_rate=600.0,
                          price=38.0, baseline=150.0)
@@ -88,7 +88,7 @@ def test_a_scraped_row_is_never_overwritten_by_the_poller(tmp_path):
             VintedItem(id=888, title="poller version", price=1.0, currency="GBP",
                        brand_title="Rab", size="M", condition="Good", url="u",
                        image_url="i"),
-            brand="rab", category="men_jackets", gender="men",
+            brand="rab", catalog_id=2052, gender="men",
             garment_type="clothes", now=now,
         )
         hot.mark_alerted(888, heat=0.5, fav_rate=1, view_rate=1, price=1.0,
@@ -100,7 +100,7 @@ def test_a_scraped_row_is_never_overwritten_by_the_poller(tmp_path):
             VintedItem(id=888, title="scraped version", price=42.0, currency="GBP",
                        brand_title="Rab", size="M", condition="Good", url="u2",
                        image_url="i2"),
-            brand="rab", category="men_jackets", catalog_id=2052,
+            brand="rab", catalog_id=2052,
             gender="men", garment_type="clothes",
         )
         db.commit()

@@ -9,9 +9,10 @@ from pathlib import Path
 from ..vinted.models import VintedItem
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
+INDEX_PATH = Path(__file__).resolve().parent / "indexes.sql"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "vinted.db"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Every category name this database has ever stored, and the Vinted catalog id it
 # means. Frozen as a literal on purpose.
@@ -63,7 +64,7 @@ def _utc_now_iso() -> str:
 @dataclass(frozen=True)
 class Observation:
     brand: str
-    category: str
+    catalog_id: int
     price: float
 
 
@@ -84,8 +85,12 @@ class Database:
             self._init_schema()
 
     def _init_schema(self) -> None:
+        # Tables, then migrations, then indexes -- in that order. The indexes
+        # name columns the migrations add, so building them alongside the tables
+        # fails on any database old enough to still need migrating.
         self.conn.executescript(SCHEMA_PATH.read_text())
         self._migrate()
+        self.conn.executescript(INDEX_PATH.read_text())
         self.conn.commit()
 
     def _migrate(self) -> None:
@@ -116,6 +121,10 @@ class Database:
             self._key_categories_by_id()
             self._set_version(1)
 
+        if self._version() < 2:
+            self._drop_category_names()
+            self._set_version(2)
+
     def _version(self) -> int:
         return self.conn.execute("PRAGMA user_version").fetchone()[0]
 
@@ -131,13 +140,16 @@ class Database:
         category added between that literal being written and this migration
         running still resolves. Where both know a name they must agree.
         """
-        derived = {
-            row["category"]: row["catalog_id"]
-            for row in self.conn.execute(
-                "SELECT category, catalog_id FROM items "
-                "WHERE catalog_id IS NOT NULL GROUP BY category"
-            )
-        }
+        items_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(items)")}
+        derived = {}
+        if "category" in items_columns:
+            derived = {
+                row["category"]: row["catalog_id"]
+                for row in self.conn.execute(
+                    "SELECT category, catalog_id FROM items "
+                    "WHERE catalog_id IS NOT NULL GROUP BY category"
+                )
+            }
         for name, catalog_id in HISTORICAL_CATALOG_IDS.items():
             if name in derived and derived[name] != catalog_id:
                 raise RuntimeError(
@@ -168,8 +180,17 @@ class Database:
         if "catalog_id" not in have:
             self.conn.execute("ALTER TABLE price_observations ADD COLUMN catalog_id INTEGER")
 
+        # A database created from the current schema has no name column to read,
+        # so there is nothing to translate. This runs on new files too, because
+        # user_version starts at zero for them as well.
+        stale = [t for t in ("price_observations", "items")
+                 if "category" in {row[1] for row in
+                                   self.conn.execute(f"PRAGMA table_info({t})")}]
+        if not stale:
+            return
+
         mapping = self._catalog_id_map()
-        for table in ("price_observations", "items"):
+        for table in stale:
             names = [row[0] for row in self.conn.execute(
                 f"SELECT DISTINCT category FROM {table} WHERE catalog_id IS NULL")]
             unknown = [n for n in names if n not in mapping]
@@ -185,6 +206,50 @@ class Database:
                 [(mapping[n], n) for n in names],
             )
 
+    def _drop_category_names(self) -> None:
+        """Retire the category name columns; `catalog_id` is the key now.
+
+        Dropping them is not just tidiness. `items.category` was NOT NULL, and
+        the poller has no name to supply -- it knows only the catalog id -- so
+        while the column existed every listing merged from the poller needed a
+        name invented for it.
+
+        `baselines` and `deals` are wholly recomputed on every run
+        (`replace_baselines` and `replace_deals` each begin with a DELETE), so
+        there is nothing in them worth converting; dropping and letting the
+        schema script rebuild them keeps schema.sql the single definition of
+        their shape. `baselines` could not be converted in place regardless --
+        its primary key is part of what changed, and SQLite cannot alter one.
+
+        `ALTER TABLE ... DROP COLUMN` refuses a column an index mentions, hence
+        dropping each index and recreating it on `catalog_id`. That also rebuilds
+        both indexes around a 2-byte integer instead of an average 17-byte
+        string.
+        """
+        for table, index, columns in (
+            ("items", "idx_items_brand_cat", "brand, catalog_id"),
+            ("price_observations", "idx_obs_bracket", "brand, catalog_id, observed"),
+        ):
+            present = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "category" not in present:
+                continue
+            orphans = self.conn.execute(
+                f"SELECT count(*) FROM {table} WHERE catalog_id IS NULL"
+            ).fetchone()[0]
+            if orphans:
+                raise RuntimeError(
+                    f"{orphans} rows in {table} still have no catalog_id. Dropping "
+                    f"`category` now would destroy the only record of which "
+                    f"category they belong to."
+                )
+            self.conn.execute(f"DROP INDEX IF EXISTS {index}")
+            self.conn.execute(f"ALTER TABLE {table} DROP COLUMN category")
+            self.conn.execute(f"CREATE INDEX IF NOT EXISTS {index} ON {table}({columns})")
+
+        self.conn.execute("DROP TABLE IF EXISTS baselines")
+        self.conn.execute("DROP TABLE IF EXISTS deals")
+        self.conn.executescript(SCHEMA_PATH.read_text())   # recreates them empty
+
     def close(self) -> None:
         self.conn.close()
 
@@ -197,18 +262,18 @@ class Database:
     # -- items & observations ------------------------------------------------
 
     def upsert_item(
-        self, item: VintedItem, *, brand: str, category: str, catalog_id: int,
+        self, item: VintedItem, *, brand: str, catalog_id: int,
         gender: str, garment_type: str,
     ) -> None:
         """Insert a new item or refresh an existing one's price/last_seen."""
         now = _utc_now_iso()
         self.conn.execute(
             """
-            INSERT INTO items (id, brand, brand_title, category, catalog_id, gender,
+            INSERT INTO items (id, brand, brand_title, catalog_id, gender,
                                garment_type, title, price, currency, size, condition,
                                url, image_url, first_seen, last_seen, active,
                                favourite_count, view_count, listed_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 price           = excluded.price,
                 size            = excluded.size,
@@ -221,7 +286,7 @@ class Database:
                 listed_ts       = COALESCE(items.listed_ts, excluded.listed_ts)
             """,
             (
-                item.id, brand, item.brand_title, category, catalog_id, gender,
+                item.id, brand, item.brand_title, catalog_id, gender,
                 garment_type, item.title, item.price, item.currency or "GBP", item.size,
                 item.condition, item.url, item.image_url, now, now,
                 item.favourite_count, item.view_count, item.listed_ts,
@@ -229,15 +294,15 @@ class Database:
         )
 
     def add_observation(
-        self, item: VintedItem, *, brand: str, category: str, catalog_id: int,
+        self, item: VintedItem, *, brand: str, catalog_id: int,
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO price_observations
-                   (item_id, brand, category, catalog_id, price, observed)
-            VALUES (?, ?, ?, ?, ?, ?)
+                   (item_id, brand, catalog_id, price, observed)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (item.id, brand, category, catalog_id, item.price, _utc_now_iso()),
+            (item.id, brand, catalog_id, item.price, _utc_now_iso()),
         )
 
     def mark_stale_items(self, stale_days: int) -> int:
@@ -319,17 +384,19 @@ class Database:
             microsecond=0
         ).isoformat()
         rows = self.conn.execute(
-            "SELECT brand, category, price FROM price_observations WHERE observed >= ?",
+            "SELECT brand, catalog_id, price FROM price_observations "
+            "WHERE observed >= ?",
             (cutoff,),
         ).fetchall()
-        return [Observation(r["brand"], r["category"], r["price"]) for r in rows]
+        return [Observation(r["brand"], r["catalog_id"], r["price"]) for r in rows]
 
-    def replace_baselines(self, baselines: list[tuple[str, str, float, float, int]]) -> None:
+    def replace_baselines(self, baselines: list[tuple[str, int, float, float, int]]) -> None:
         now = _utc_now_iso()
         self.conn.execute("DELETE FROM baselines")
         self.conn.executemany(
             """
-            INSERT INTO baselines (brand, category, median, mad, sample_size, computed_at)
+            INSERT INTO baselines (brand, catalog_id, median, mad, sample_size,
+                                   computed_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             [(b, c, med, mad, n, now) for (b, c, med, mad, n) in baselines],
@@ -345,26 +412,13 @@ class Database:
         self.conn.execute("DELETE FROM deals")
         self.conn.executemany(
             """
-            INSERT INTO deals (item_id, brand, category, price, baseline, baseline_src,
-                               discount_pct, deal_score, flagged_at)
-            VALUES (:item_id, :brand, :category, :price, :baseline, :baseline_src,
-                    :discount_pct, :deal_score, :flagged_at)
+            INSERT INTO deals (item_id, brand, catalog_id, price, baseline,
+                               baseline_src, discount_pct, deal_score, flagged_at)
+            VALUES (:item_id, :brand, :catalog_id, :price, :baseline,
+                    :baseline_src, :discount_pct, :deal_score, :flagged_at)
             """,
             [{**d, "flagged_at": now} for d in deals],
         )
-
-    def deals_for_site(self) -> list[sqlite3.Row]:
-        """Deals joined with their item details, best discount first."""
-        return self.conn.execute(
-            """
-            SELECT d.*, i.title, i.brand_title, i.gender, i.garment_type, i.size,
-                   i.condition, i.url, i.image_url, i.first_seen, i.last_seen
-            FROM deals d
-            JOIN items i ON i.id = d.item_id
-            WHERE i.active = 1
-            ORDER BY d.discount_pct DESC
-            """
-        ).fetchall()
 
     def merge_alerts(self, hot_db_path: str | Path) -> int:
         """Copy the poller's alert log — and the listings themselves — into the DB.
@@ -379,7 +433,7 @@ class Database:
            the listings this system exists to catch.
 
         Scraped rows always win over poller rows where both exist — the daily
-        scrape carries `catalog_id` and price history the poller never sees.
+        scrape carries price history the poller never sees.
         """
         hot_path = Path(hot_db_path)
         if not hot_path.exists():
@@ -390,11 +444,11 @@ class Database:
             # join against.
             self.conn.execute(
                 """
-                INSERT INTO items (id, brand, brand_title, category, gender,
+                INSERT INTO items (id, brand, brand_title, catalog_id, gender,
                                    garment_type, title, price, currency, size,
                                    condition, url, image_url, first_seen, last_seen,
                                    active, listed_ts)
-                SELECT m.item_id, m.brand, m.brand_title, m.category, m.gender,
+                SELECT m.item_id, m.brand, m.brand_title, m.catalog_id, m.gender,
                        m.garment_type, m.title, m.price, m.currency, m.size,
                        m.condition, m.url, m.image_url,
                        strftime('%Y-%m-%dT%H:%M:%S+00:00', m.first_seen, 'unixepoch'),

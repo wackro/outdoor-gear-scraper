@@ -48,12 +48,12 @@ def compute_stats(prices: list[float]) -> BaselineStat:
 
 def compute_baselines(
     observations: list[Observation],
-) -> tuple[dict[tuple[str, str], BaselineStat], dict[str, BaselineStat]]:
+) -> tuple[dict[tuple[str, int], BaselineStat], dict[str, BaselineStat]]:
     """Return (per brand+category stats, per-brand aggregate stats)."""
-    by_bracket: dict[tuple[str, str], list[float]] = {}
+    by_bracket: dict[tuple[str, int], list[float]] = {}
     by_brand: dict[str, list[float]] = {}
     for obs in observations:
-        by_bracket.setdefault((obs.brand, obs.category), []).append(obs.price)
+        by_bracket.setdefault((obs.brand, obs.catalog_id), []).append(obs.price)
         by_brand.setdefault(obs.brand, []).append(obs.price)
 
     bracket_stats = {key: compute_stats(prices) for key, prices in by_bracket.items()}
@@ -62,7 +62,7 @@ def compute_baselines(
 
 
 class BaselineProvider(Protocol):
-    def reference(self, brand: str, category: str) -> Reference | None: ...
+    def reference(self, brand: str, catalog_id: int) -> Reference | None: ...
 
 
 class HistoryBaseline:
@@ -74,7 +74,7 @@ class HistoryBaseline:
 
     def __init__(
         self,
-        bracket_stats: dict[tuple[str, str], BaselineStat],
+        bracket_stats: dict[tuple[str, int], BaselineStat],
         brand_stats: dict[str, BaselineStat],
         min_samples: int,
     ):
@@ -82,8 +82,8 @@ class HistoryBaseline:
         self.brand_stats = brand_stats
         self.min_samples = min_samples
 
-    def reference(self, brand: str, category: str) -> Reference | None:
-        stat = self.bracket_stats.get((brand, category))
+    def reference(self, brand: str, catalog_id: int) -> Reference | None:
+        stat = self.bracket_stats.get((brand, catalog_id))
         if stat and stat.sample_size >= self.min_samples:
             return Reference(stat.median, "history", stat.mad)
         brand_stat = self.brand_stats.get(brand)
@@ -96,13 +96,13 @@ class RRPBaseline:
     """Reference = configured retail price for a brand+category, when present."""
 
     def __init__(self, config: Config):
-        self._rrp: dict[tuple[str, str], float] = {}
+        self._rrp: dict[tuple[str, int], float] = {}
         for brand in config.brands:
-            for category, price in (brand.rrp or {}).items():
-                self._rrp[(brand.name, category)] = float(price)
+            for catalog_id, price in (brand.rrp or {}).items():
+                self._rrp[(brand.name, int(catalog_id))] = float(price)
 
-    def reference(self, brand: str, category: str) -> Reference | None:
-        price = self._rrp.get((brand, category))
+    def reference(self, brand: str, catalog_id: int) -> Reference | None:
+        price = self._rrp.get((brand, catalog_id))
         if price is None:
             return None
         return Reference(price, "rrp", None)
@@ -114,9 +114,9 @@ class CompositeBaseline:
     def __init__(self, *providers: BaselineProvider):
         self.providers = providers
 
-    def reference(self, brand: str, category: str) -> Reference | None:
+    def reference(self, brand: str, catalog_id: int) -> Reference | None:
         for provider in self.providers:
-            ref = provider.reference(brand, category)
+            ref = provider.reference(brand, catalog_id)
             if ref is not None:
                 return ref
         return None

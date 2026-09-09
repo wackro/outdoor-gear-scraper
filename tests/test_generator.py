@@ -23,7 +23,7 @@ def add_alerted(db, item_id=1, *, sold=False):
                    url=f"https://vinted.co.uk/items/{item_id}", image_url="img",
                    favourite_count=20, view_count=300,
                    listed_ts=int(time.time() - 1800)),
-        brand="rab", category="men_jackets", catalog_id=2052,
+        brand="rab", catalog_id=2052,
         gender="men", garment_type="clothes",
     )
     db.conn.execute(
@@ -102,7 +102,7 @@ class TestRender:
             VintedItem(id=2, title="</script><script>alert(1)</script>",
                        price=10.0, currency="GBP", brand_title="Rab", size="M",
                        condition="Good", url="u", image_url="i"),
-            brand="rab", category="men_jackets", catalog_id=1,
+            brand="rab", catalog_id=1,
             gender="men", garment_type="clothes",
         )
         db.conn.execute(

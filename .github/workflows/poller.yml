@@ -57,9 +57,15 @@ jobs:
             data/hot.db
             data/hot.db-wal
             data/hot.db-shm
-          key: hot-state-${{ github.run_id }}-${{ github.run_attempt }}
+          # The v2 prefix abandons every cache written before `item_meta` was
+          # re-keyed on catalog_id. Its schema is CREATE TABLE IF NOT EXISTS, so
+          # a restored older file would keep the old column and every write would
+          # fail. Bump this prefix whenever hot.db's shape changes; the file is
+          # disposable by design and costs about half an hour of velocity
+          # history to rebuild.
+          key: hot-state-v2-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            hot-state-
+            hot-state-v2-
 
       - name: Configure git for feed pushes
         run: |
