@@ -16,9 +16,6 @@ from typing import Protocol
 from ..config import Config
 from ..storage.db import Observation
 
-BRAND_LEVEL = "*"  # sentinel category for brand-wide (all-category) baselines
-
-
 @dataclass(frozen=True)
 class BaselineStat:
     median: float

@@ -242,18 +242,18 @@ class Poller:
                 self.stats.errors += 1
                 self.stats.blocks += 1
                 self._consecutive_failures += 1
-                log.warning("Blocked fetching %s: %s", category.name, exc)
+                log.warning("Blocked fetching %s: %s", category.label, exc)
                 self._enter_cooldown()
                 return
             except VintedError as exc:
                 self.stats.errors += 1
                 self._consecutive_failures += 1
-                log.warning("Fetch failed for %s: %s", category.name, exc)
+                log.warning("Fetch failed for %s: %s", category.label, exc)
                 return
             except Exception as exc:  # noqa: BLE001 — never die mid-loop
                 self.stats.errors += 1
                 self._consecutive_failures += 1
-                log.warning("Unexpected fetch error for %s: %s", category.name, exc)
+                log.warning("Unexpected fetch error for %s: %s", category.label, exc)
                 return
 
             self._consecutive_failures = 0
@@ -293,7 +293,7 @@ class Poller:
         marked = self.state.mark_gone(gone, now)
         if marked:
             self.stats.sold_seen += marked
-            log.info("%s: %d listing(s) gone (likely sold).", category.name, marked)
+            log.info("%s: %d listing(s) gone (likely sold).", category.label, marked)
 
     def _enter_cooldown(self) -> None:
         """Back off hard after a block, doubling each time.

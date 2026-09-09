@@ -232,12 +232,9 @@ brands:
     search: "Arc'teryx"      # only needed if the display name differs from the key
     threshold: 0.35          # optional per-brand override
     rrp:                     # optional retail prices, used as a fallback baseline
-      mens_outerwear: 250
+      2052: 250              # keyed by Vinted catalog id
   the_north_face:
     id: 2319                 # optional: pin a known id (skips resolution / used as fallback)
-
-categories:
-  mens_outerwear: 2052       # category ids are still read from a Vinted URL (see below)
 ```
 
 If a name can't be resolved, the run logs it and skips that brand (falling back to
@@ -246,13 +243,12 @@ brand search URL on [vinted.co.uk](https://www.vinted.co.uk).
 
 ### Categories, sizes and quality
 
-**Categories** are identified by **Vinted catalog `id`**, with the human-readable
-title in a trailing comment:
+**Categories** are identified by **Vinted catalog `id`**:
 
 ```yaml
 categories:
-  - {id: 2052, gender: men, type: clothes, name: men_jackets}        # Jackets
-  - {id: 2678, gender: men, type: shoes,   name: men_hiking_boots}   # Hiking boots & shoes
+  - {id: 2052, gender: men, type: clothes, label: "Jackets"}
+  - {id: 2678, gender: men, type: shoes,   label: "Hiking boots & shoes"}
 ```
 
 By id rather than title, because Vinted's tree contains genuine duplicate
@@ -263,11 +259,12 @@ so a title lookup can silently bind to the wrong node. To find ids:
 python -m scripts.list_categories        # dumps the men's tree; pass "Women" etc. for others
 ```
 
-`name` is the **database key**, not a display name: it appears in
-`items.category`, `deals.category` and `baselines.category`, so renaming one
-orphans that category's accumulated price history. Duplicate ids and duplicate
-names are both rejected at load time — each would otherwise fail silently, one
-by wasting a rotation slot, the other by merging two categories' history.
+`label` is shown to humans and nothing else — log lines and error messages. The
+database keys every category by `id` (`items.catalog_id`,
+`price_observations.catalog_id`, `baselines`, `deals`), so relabelling one is
+free. A duplicate `id` is rejected at load time, because it would silently waste
+a rotation slot re-reading listings we already have; a duplicate `label` is
+allowed, since it is only cosmetic.
 
 **Sizes** are an allow-list per gender + type; anything else is hidden. Matching
 is strict and type-aware (shoes read the UK number, trousers read the waist,

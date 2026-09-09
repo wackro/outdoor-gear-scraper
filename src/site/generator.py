@@ -37,10 +37,6 @@ SECTION_LABELS = {"men": "Men's", "women": "Women's", "bags": "Bags"}
 FALLBACK_FEED_NAME = "hot.json"
 
 
-def _humanize(name: str) -> str:
-    return (name or "").replace("_", " ").title()
-
-
 def resolve_feed_url(configured: str, branch: str) -> str:
     """Where the page should fetch live data from.
 

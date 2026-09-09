@@ -55,7 +55,7 @@ def scrape(
         try:
             items = client.fetch_items(all_brand_ids, catalog_id)
         except VintedError as exc:
-            log.error("Scrape failed for %s: %s", category.name, exc)
+            log.error("Scrape failed for %s: %s", category.label, exc)
             continue
         stored = 0
         for item in items:
@@ -69,7 +69,7 @@ def scrape(
             db.add_observation(item, brand=brand_name, catalog_id=catalog_id)
             stored += 1
         total += stored
-        log.info("%s: %d items", category.name, stored)
+        log.info("%s: %d items", category.label, stored)
         client.throttle()  # polite pause between queries
     return total
 
