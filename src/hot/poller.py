@@ -38,6 +38,11 @@ from .thresholds import Bar, build_bar
 
 log = logging.getLogger("poller")
 
+# How many cycles of complete silence before we say so. Generous on purpose: UK
+# listing volume really does fall to almost nothing overnight, and crying wolf
+# at 4am is how a warning gets muted.
+SILENT_CYCLES_BEFORE_WARNING = 15
+
 
 @dataclass
 class Stats:
@@ -131,6 +136,7 @@ class Poller:
         self._stop = False
         self._rotation = 0
         self._consecutive_failures = 0
+        self._warned_blind = False
         self._cooldown = 0.0
         self._last_session_refresh = time.time()
         self._last_bar_refresh = 0.0
@@ -408,12 +414,17 @@ class Poller:
                 self.stats.errors += 1
                 log.exception("Cycle failed")
 
+            self._check_for_silence()
+
             if self._consecutive_failures >= self.config.poll.circuit_breaker_failures:
                 log.error(
                     "Circuit breaker: %d consecutive failures. Pausing.",
                     self._consecutive_failures,
                 )
-                self._notify_breaker()
+                self._warn_blind(
+                    f"{self._consecutive_failures} consecutive failed fetches "
+                    f"tripped the circuit breaker."
+                )
                 self._consecutive_failures = 0
                 self._cooldown = self.config.poll.cooldown_max_sec
 
@@ -433,22 +444,54 @@ class Poller:
         while time.time() < end and not self._stop:
             time.sleep(min(1.0, end - time.time()))
 
-    def _notify_breaker(self) -> None:
-        """Tell the user the poller is blind, rather than failing silently.
+    def _warn_blind(self, reason: str) -> None:
+        """Tell the user the poller has stopped seeing anything.
 
         Actions logs are ephemeral and nobody watches them; a scraper that has
-        been quietly blocked for a week looks exactly like a quiet market.
+        been quietly broken for a week looks exactly like a quiet market. That is
+        not hypothetical -- it ran 5h45m reporting success while tracking
+        nothing, and the only clue was a feed that had stopped changing.
+
+        `send_health` rather than a fabricated `Alert`: this used to invent a
+        listing with `item_id=0` and `price=0.0` to fit the alert shape, which
+        also meant it came out of the alert budget and fired again on every trip.
+
+        Once per run. An outage lasts hours and the loop keeps turning, so
+        without the latch this becomes a push every cycle for as long as the
+        fault lasts -- which is how a warning worth reading turns into one you
+        mute.
         """
-        from ..notify.base import Alert
+        if self._warned_blind:
+            return
+        self._warned_blind = True
         try:
-            self.notifier.send(Alert(
-                item_id=0, title="Vinted poller is being blocked — check the workflow logs.",
-                brand_title="poller", price=0.0, currency="GBP", url="", image_url="",
-                size="", condition="", heat=0.0, favourites=None, views=None,
-                fav_per_hour=None, view_per_hour=None, age_minutes=0.0, measured=True,
-            ))
-        except Exception:  # noqa: BLE001
-            pass
+            self.notifier.send_health(
+                "Vinted poller is blind",
+                f"{reason}\n\n"
+                f"{self.stats.errors} errors and {self.stats.blocks} blocks across "
+                f"{self.stats.requests} requests in {self.stats.ticks} cycles.\n"
+                f"Nothing can be alerted on until this clears. Check the workflow "
+                f"logs, and run the probe-endpoint workflow if the cause is not "
+                f"obvious from them.",
+            )
+        except Exception:  # noqa: BLE001 -- warning about a fault must not cause one
+            log.exception("Could not send the health warning")
+
+    def _check_for_silence(self) -> None:
+        """Catch the failure the circuit breaker cannot see.
+
+        The breaker counts *failed* requests, so it never trips when Vinted
+        answers 200 with an empty list -- which looks identical to a dead market
+        from in here. Requiring a good number of cycles first is what keeps a
+        genuinely quiet 4am from tripping it.
+        """
+        if self.stats.ticks < SILENT_CYCLES_BEFORE_WARNING:
+            return
+        if self.stats.items_seen or not self.stats.requests:
+            return
+        self._warn_blind(
+            f"{self.stats.requests} requests succeeded but returned no listings at all."
+        )
 
     def _finish(self) -> None:
         self.state.commit()

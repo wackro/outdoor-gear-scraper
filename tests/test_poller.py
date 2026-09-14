@@ -43,9 +43,14 @@ class FakeClient:
 class Recorder(Notifier):
     def __init__(self):
         self.sent = []
+        self.health = []
 
     def send(self, alert):
         self.sent.append(alert)
+        return True
+
+    def send_health(self, title, message):
+        self.health.append((title, message))
         return True
 
 
@@ -252,3 +257,71 @@ class TestRunSummary:
         assert "not to a phone" in summary
         assert "not to a phone" not in poller.stats.as_markdown(
             poller.bar, channel="ntfy")
+
+
+class TestBlindnessWarning:
+    """Saying so when the poller has stopped seeing anything.
+
+    On 14 Sep the catalog endpoint began returning 404 and the poller carried on
+    reporting success for hours while tracking nothing. The feed simply stopped
+    changing, which from the outside is indistinguishable from a quiet market.
+    """
+
+    def test_repeated_fetch_failures_warn_once(self, build):
+        from src.vinted.client import VintedError
+        poller, _, notifier = build([], error=VintedError("HTTP 404 for /api/v2/catalog/items"))
+
+        # One category per cycle means one failure per cycle, so it takes
+        # `circuit_breaker_failures` of them to trip. Then keep going well past.
+        for _ in range(poller.config.poll.circuit_breaker_failures + 10):
+            poller.run(once=True)
+
+        assert len(notifier.health) == 1, "an outage lasts hours; warn once, not per cycle"
+        title, message = notifier.health[0]
+        assert "blind" in title.lower()
+        assert "circuit breaker" in message
+
+    def test_the_warning_says_what_to_do_next(self, build):
+        from src.vinted.client import VintedError
+        poller, _, notifier = build([], error=VintedError("HTTP 404"))
+        for _ in range(poller.config.poll.circuit_breaker_failures):
+            poller.run(once=True)
+
+        _, message = notifier.health[0]
+        assert "probe-endpoint" in message, "the reader needs a next step, not just bad news"
+
+    def test_silence_warns_even_though_nothing_failed(self, build):
+        """The case the circuit breaker structurally cannot see.
+
+        It counts failed requests. A 200 carrying an empty list is not a failure,
+        so a backend that silently stops returning results trips nothing at all.
+        """
+        from src.hot.poller import SILENT_CYCLES_BEFORE_WARNING
+        poller, client, notifier = build([])          # every fetch succeeds, empty
+
+        for _ in range(SILENT_CYCLES_BEFORE_WARNING + 1):
+            poller.run(once=True)
+
+        assert client.calls > 0, "it really did ask"
+        assert poller.stats.errors == 0, "and nothing errored"
+        assert len(notifier.health) == 1
+        assert "no listings at all" in notifier.health[0][1]
+
+    def test_a_briefly_quiet_market_is_not_an_emergency(self, build):
+        """Overnight volume really does fall to nearly nothing."""
+        from src.hot.poller import SILENT_CYCLES_BEFORE_WARNING
+        poller, _, notifier = build([])
+
+        for _ in range(SILENT_CYCLES_BEFORE_WARNING - 1):
+            poller.run(once=True)
+
+        assert notifier.health == []
+
+    def test_finding_listings_keeps_it_quiet(self, build):
+        from src.hot.poller import SILENT_CYCLES_BEFORE_WARNING
+        poller, _, notifier = build([[make_item(1, 3)]])
+
+        for _ in range(SILENT_CYCLES_BEFORE_WARNING + 2):
+            poller.run(once=True)
+
+        assert notifier.health == [], "it saw listings; nothing is wrong"

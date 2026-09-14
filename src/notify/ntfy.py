@@ -27,6 +27,7 @@ TIMEOUT_SEC = 10
 # ntfy priorities: 1 min, 3 default, 4 high, 5 max. 5 breaks through a phone's
 # silent mode, so it is reserved for the strongest signal we have — a listing
 # that is both moving fast AND clearly underpriced.
+PRIORITY_DEFAULT = 3
 PRIORITY_HIGH = 4
 PRIORITY_URGENT = 5
 
@@ -68,9 +69,28 @@ class NtfyNotifier(Notifier):
             payload["attach"] = alert.image_url
         return payload
 
+    def send_health(self, title: str, message: str) -> bool:
+        """Publish a warning about the poller itself.
+
+        Deliberately quiet: default priority and no click action, because this
+        is "something needs looking at when you get a moment", not "buy this in
+        the next four minutes". Using the same urgency as a bargain alert would
+        teach you to ignore both.
+        """
+        return self._publish({
+            "topic": self.topic,
+            "title": title,
+            "message": message,
+            "priority": PRIORITY_DEFAULT,
+            "tags": ["warning"],
+        })
+
     def send(self, alert: Alert) -> bool:
         """Publish one alert. Never raises — a failed push must not stop polling."""
-        body = json.dumps(self._payload(alert)).encode("utf-8")
+        return self._publish(self._payload(alert), describe=alert.headline())
+
+    def _publish(self, payload: dict, *, describe: str = "") -> bool:
+        body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -79,7 +99,7 @@ class NtfyNotifier(Notifier):
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:
                 if 200 <= response.status < 300:
-                    log.info("Alerted: %s", alert.headline())
+                    log.info("Pushed: %s", describe or payload.get("title", ""))
                     return True
                 log.warning("ntfy returned HTTP %s", response.status)
                 return False

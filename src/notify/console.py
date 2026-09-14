@@ -16,3 +16,8 @@ class ConsoleNotifier(Notifier):
         print(indented)
         print(f"        {alert.url}")
         return True
+
+    def send_health(self, title: str, message: str) -> bool:
+        print(f"\n[HEALTH] {title}")
+        print("\n".join(f"        {line}" for line in message.splitlines()))
+        return True
