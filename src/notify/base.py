@@ -93,6 +93,16 @@ class Notifier(ABC):
     def send(self, alert: Alert) -> bool:
         """Deliver one alert. Return True on success. Must not raise."""
 
+    @abstractmethod
+    def send_health(self, title: str, message: str) -> bool:
+        """Deliver a message about the poller itself. Must not raise.
+
+        Separate from `send` because an `Alert` is a listing -- price, size,
+        heat, a link to buy -- and a health warning is none of those. Squeezing
+        one into that shape would mean inventing an item id and a price for
+        something that has neither.
+        """
+
 
 class BurstLimited(Notifier):
     """Wraps a notifier with a hard ceiling on pushes per hour.
@@ -123,6 +133,16 @@ class BurstLimited(Notifier):
             self._sent.append(now)
             return True
         return False
+
+    def send_health(self, title: str, message: str) -> bool:
+        """Passed straight through, and never charged to the alert budget.
+
+        Being flooded with alerts is exactly when you most need to hear that
+        something is wrong, so spending the alert cap on the warning about it
+        would be backwards. How *often* to warn is not decided here -- this
+        object has no idea what a run is; the caller holds that.
+        """
+        return self.inner.send_health(title, message)
 
 
 def build_notifier(config, *, dry_run: bool = False) -> Notifier:
