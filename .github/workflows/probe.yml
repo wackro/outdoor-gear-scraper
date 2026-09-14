@@ -1,0 +1,42 @@
+name: probe-endpoint
+
+# Diagnostic, run by hand when the scrape starts failing and it is not obvious
+# whether Vinted moved the endpoint, started rejecting a parameter, or began
+# blocking us behind a 404. Sends the real requests and reports what came back.
+#
+# Also runs on a push to the probe itself, so a change to it reports immediately
+# rather than waiting for someone to remember it exists.
+#
+# Read-only by design: it never touches the database, the feed, or any branch.
+on:
+  push:
+    paths:
+      - 'scripts/probe_endpoint.py'
+      - 'src/vinted/diagnose.py'
+      - '.github/workflows/probe.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-endpoint
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe the API
+        env:
+          # Use the proxy if one is configured, so the probe sees what the
+          # scraper sees rather than a different route to the same endpoint.
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python -m scripts.probe_endpoint
