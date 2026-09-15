@@ -375,13 +375,31 @@ class TestFieldCoverage:
 
     def test_it_reports_a_percentage_per_field(self):
         probe = self._probe(
-            '{"items":[{"favourite_count":1,"brand_title":"Rab"},'
+            '{"items":[{"favourite_count":1,"item_box":{"first_line":"Rab"}},'
             '          {"favourite_count":2},'
-            '          {"brand_title":"Rab"},'
+            '          {"item_box":{"first_line":"Rab"}},'
             '          {}]}')
         assert probe.coverage["favourite_count"] == 50.0
-        assert probe.coverage["brand_title"] == 50.0
-        assert probe.coverage["status"] == 0.0
+        assert probe.coverage["item_box.first_line"] == 50.0
+        assert probe.coverage["view_count"] == 0.0
+
+    def test_a_nested_field_is_measured_where_it_actually_lives(self):
+        """Brand moved inside item_box. Measuring the old top-level name
+        reported 0% on a response that had the brand all along — which read as
+        a dead endpoint and sent the last parse off on an assumption."""
+        probe = self._probe('{"items":[{"item_box":{"first_line":"Arc\'teryx"}}]}')
+        assert probe.coverage["item_box.first_line"] == 100.0
+
+    def test_an_empty_string_is_absent_not_present(self):
+        """`brand_title: ""` is exactly the case that dropped every listing; a
+        coverage number that called it present would have concealed it."""
+        probe = self._probe('{"items":[{"item_box":{"first_line":""}}]}')
+        assert probe.coverage["item_box.first_line"] == 0.0
+
+    def test_a_zero_count_is_present(self):
+        """Nobody has liked it yet is a fact, not a missing field."""
+        probe = self._probe('{"items":[{"favourite_count":0}]}')
+        assert probe.coverage["favourite_count"] == 100.0
 
     def test_partial_coverage_still_counts_as_present(self):
         """One listing in twenty is enough to prove the field exists at all —
@@ -396,11 +414,12 @@ class TestFieldCoverage:
 
 
 class TestServiceCandidate:
-    def test_the_relocated_endpoint_is_probed_first(self):
-        """It is not a guess — it is somebody else's working code."""
+    def test_the_live_request_shape_is_probed_first(self):
+        """Whichever probe runs first is the one whose sample listing gets
+        printed, so it must be the shape production actually sends."""
         client = FakeClient(FakeSession([]))
         probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
-        assert probes[0].name == "svc-catalogue/items"
+        assert probes[0].name == "all brands, repeated keys"
         assert "api.vinted.co.uk/svc-catalogue/items" in probes[0].url
 
     def test_it_sends_the_restructured_filters(self):
@@ -410,13 +429,29 @@ class TestServiceCandidate:
         assert catalogue, "it never called the service"
         params = catalogue[0][1]
         assert params["attribute_ids[catalog]"] == 2052
-        assert params["attribute_ids[brand]"] == "99"
+        assert params["attribute_ids[brand]"] == [99], "must stay a list"
         assert "catalog_ids" not in params, "the old filter shape is gone"
 
-    def test_it_also_asks_whether_the_auth_headers_are_required(self):
+    def test_it_contrasts_both_brand_encodings(self):
+        """The comma-joined shape is the control: it is what the scraper sent
+        while it stored nothing, and the two rows side by side turn the
+        diagnosis into a demonstration."""
+        client = FakeClient(FakeSession([]))
+        probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1, 2])
+        by_name = {p.name: p for p in probes}
+        assert "all brands, repeated keys" in by_name
+        assert "all brands, comma-joined" in by_name
+
+        session = FakeSession([])
+        hunt_for_replacement(FakeClient(session), catalog_id=2052, brand_ids=[1, 2])
+        joined = [c for c in session.calls
+                  if c[1].get("attribute_ids[brand]") == "1,2"]
+        assert joined, "the failing shape was never reproduced"
+
+    def test_it_isolates_what_the_locale_header_changes(self):
         client = FakeClient(FakeSession([]))
         probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
-        assert any("no auth headers" in p.name for p in probes)
+        assert any("no Locale header" in p.name for p in probes)
 
 
 class TestClientRepointed:
@@ -468,3 +503,28 @@ class TestSampleListing:
         probe = self._probe('{"items":[]}')
         assert probe.sample_keys == []
         assert probe.sample_json == ""
+
+    def test_bulk_never_crowds_out_the_informative_keys(self):
+        """The first attempt at this printed six signed thumbnail URLs and then
+        stopped mid-key at `"phot`, before price, title and user -- the keys the
+        parse actually needed. The dump is budgeted, so ballast costs evidence."""
+        thumbs = ",".join(['{"url":"%s"}' % ("x" * 400)] * 6)
+        probe = self._probe(
+            '{"items":[{"photo":{"thumbnails":[%s],"url":"main.webp"},'
+            '           "price":{"amount":"120.0","currency_code":"GBP"},'
+            '           "title":"Alpha SV"}]}' % thumbs)
+        assert '"price"' in probe.sample_json
+        assert '"title"' in probe.sample_json
+        assert "xxxx" not in probe.sample_json
+
+    def test_an_omitted_key_still_says_it_was_there(self):
+        """Dropped silently, it would read as a field the response lacks --
+        which is the same misreading the whole sample exists to prevent."""
+        probe = self._probe('{"items":[{"photos":[1,2,3],"id":1}]}')
+        assert "photos" in probe.sample_json
+        assert "3 entries, omitted" in probe.sample_json
+        assert "photos" in probe.sample_keys
+
+    def test_condensing_does_not_touch_anything_else(self):
+        probe = self._probe('{"items":[{"item_box":{"first_line":"Rab"}}]}')
+        assert '"first_line": "Rab"' in probe.sample_json

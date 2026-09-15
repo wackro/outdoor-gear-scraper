@@ -146,6 +146,12 @@ class Category:
 class Config:
     currency: str
     base_url: str
+    # Sent as the `Locale` and `Accept-Language` headers. Not cosmetic: the
+    # catalogue service lives on api.vinted.co.uk and, unlike the old www
+    # endpoint, does not infer locale from the host. Without this it answers in
+    # whatever it feels like -- observed French text and dollar prices -- and
+    # `condition_rank` then fails to recognise a single condition string.
+    locale: str
     scrape: ScrapeConfig
     deals: DealsConfig
     poll: PollConfig
@@ -245,6 +251,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     return Config(
         currency=raw.get("currency", "GBP"),
         base_url=raw.get("base_url", "https://www.vinted.co.uk").rstrip("/"),
+        locale=raw.get("locale", "en-GB"),
         scrape=ScrapeConfig(**(raw.get("scrape") or {})),
         deals=DealsConfig(**(raw.get("deals") or {})),
         poll=_poll_config(raw.get("poll") or {}),

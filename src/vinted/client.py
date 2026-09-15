@@ -1,7 +1,7 @@
 """Vinted UK catalog client.
 
 Vinted has no public API. This talks to the same internal JSON endpoint the
-website uses (`/api/v2/catalog/items`). Two things make that work reliably:
+website uses. Two things make that work reliably:
 
   1. A session must first be bootstrapped by loading the homepage, which sets the
      anonymous cookies the API requires.
@@ -34,6 +34,11 @@ log = logging.getLogger(__name__)
 # same session, which reads like a retirement and was a relocation.
 CATALOG_PATH = "/svc-catalogue/items"
 BRANDS_PATH = "/api/v2/brands"
+
+# The path the catalogue served from until 14 September 2026. Kept because the
+# diagnostic needs a control: probing the *new* path on the *old* host proves
+# nothing, and for one cycle that is exactly what it did.
+LEGACY_CATALOG_PATH = "/api/v2/catalog/items"
 
 
 def catalogue_host(base_url: str) -> str:
@@ -102,10 +107,31 @@ class VintedClient:
 
     # -- fetching ------------------------------------------------------------
 
+    def _service_headers(self) -> dict[str, str]:
+        """What the marketplace-web app sends the catalogue service.
+
+        `Locale` is the load-bearing one. The old www endpoint inferred locale
+        from the host; api.vinted.co.uk does not, so without this it answers in
+        a locale of its own choosing -- observed as French condition strings and
+        dollar prices, neither of which any downstream code can read.
+        """
+        return {
+            "Locale": self.config.locale,
+            "X-Next-App": "marketplace-web",
+            "Platform": "web",
+        }
+
     def _request(self, params: dict, path: str = CATALOG_PATH, result_key: str = "items",
-                 host: str | None = None) -> list[dict]:
+                 host: str | None = None, extra_headers: dict | None = None) -> list[dict]:
         """Call a Vinted API endpoint with retries/backoff; return the result list."""
-        headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+        headers = {
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            # Every request, not just the catalogue's: a browser always sends it,
+            # and a client that doesn't stands out.
+            "Accept-Language": f"{self.config.locale},{self.config.locale.split('-')[0]};q=0.9",
+            **(extra_headers or {}),
+        }
         base = host or self.base_url
 
         last_error: Exception | None = None
@@ -149,22 +175,40 @@ class VintedClient:
         error_type = VintedBlocked if blocked else VintedError
         raise error_type(f"Request failed (params={params}): {last_error}")
 
-    def _get_page(self, brand_ids: str, catalog_id: int, page: int) -> list[dict]:
+    def _get_page(self, brand_ids: list[int], catalog_id: int, page: int) -> list[dict]:
         """One page of the catalogue.
 
         Filters moved into an `attribute_ids[...]` shape when the service split
         out; `catalog_ids` and `brand_ids` are no longer recognised.
+
+        `brand_ids` stays a *list*. That is the whole fix, and it is not a
+        stylistic choice: the service wants one repeated key per id
+        (`attribute_ids[brand]=1&attribute_ids[brand]=2`), which is what
+        `urlencode(doseq=True)` produces from a list. Comma-joining them, as the
+        old `brand_ids` parameter accepted, sends a single unparseable id --
+        matching nothing, returning `{"items": []}` with a 200, and looking
+        exactly like a market where nobody is selling anything.
         """
+        if not brand_ids:
+            # An empty list drops the key entirely, which asks for the whole
+            # unfiltered catalogue -- a slow, conspicuous request whose every
+            # result the brand match then discards. `run.py` already refuses
+            # this; the poller has no such check and would repeat it every cycle.
+            raise VintedError("No brand ids to filter on; refusing to fetch the "
+                              "entire catalogue.")
         return self._request(
             {
                 "page": page,
                 "per_page": self.config.scrape.per_page,
                 "order": self.config.scrape.order,
                 "attribute_ids[catalog]": catalog_id,
-                "attribute_ids[brand]": brand_ids,  # one or many, comma-separated
+                "attribute_ids[brand]": list(brand_ids),
+                # Inert on this service -- locale decides the currency -- but
+                # harmless, and it still documents what we expect to get back.
                 "currency": self.config.currency,
             },
             host=catalogue_host(self.base_url),
+            extra_headers=self._service_headers(),
         )
 
     def resolve_brand(self, search_text: str) -> tuple[int, str] | None:
@@ -217,28 +261,54 @@ class VintedClient:
         return nodes
 
     def _parse(self, raw_items: list[dict]) -> list[VintedItem]:
-        """Turn raw catalog entries into items, skipping anything unusable."""
+        """Turn raw catalog entries into items, skipping anything unusable.
+
+        The currency test demands a positive match rather than merely the
+        absence of a contradiction. Currency now depends on a request *header*
+        rather than on which host we asked, so "no currency stated" is no longer
+        a safe bet on GBP -- and a mis-stated price does not fail, it quietly
+        joins ninety days of GBP history and skews every baseline and deal built
+        on it. Dropping the item costs one run; trusting it costs the database.
+
+        Rejections are counted and reported, because a silent zero is precisely
+        the failure that cost two merge cycles here. A run that returns nothing
+        should always be able to say what it threw away.
+        """
         items: list[VintedItem] = []
+        unparseable = 0
+        wrong_currency: dict[str, int] = {}
         for raw in raw_items:
             item = VintedItem.from_json(raw, base_url=self.base_url)
             if item is None:
+                unparseable += 1
                 continue
-            if item.currency and item.currency != self.config.currency:
-                continue  # ignore listings priced in another currency
+            if item.currency != self.config.currency:
+                seen = item.currency or "(none stated)"
+                wrong_currency[seen] = wrong_currency.get(seen, 0) + 1
+                continue
             items.append(item)
+
+        if raw_items and not items:
+            log.warning(
+                "Discarded all %d listings: %d unparseable, %d in the wrong "
+                "currency (wanted %s, saw %s).",
+                len(raw_items), unparseable, sum(wrong_currency.values()),
+                self.config.currency,
+                ", ".join(f"{name} x{n}" for name, n in sorted(wrong_currency.items()))
+                or "none",
+            )
         return items
 
     def fetch_items(self, brand_ids: list[int], catalog_id: int) -> list[VintedItem]:
         """Fetch newest items for a set of brands within a category.
 
-        Passing all watched brands in one request (Vinted accepts a
-        comma-separated `brand_ids`) keeps the request count to one per category
-        rather than one per brand+category.
+        Passing all watched brands in one request keeps the request count to one
+        per category rather than one per brand+category. The service takes them
+        as repeated `attribute_ids[brand]` keys; see `_get_page`.
         """
-        brand_ids_param = ",".join(str(b) for b in brand_ids)
         items: list[VintedItem] = []
         for page in range(1, self.config.scrape.max_pages_per_query + 1):
-            raw_items = self._get_page(brand_ids_param, catalog_id, page)
+            raw_items = self._get_page(brand_ids, catalog_id, page)
             if not raw_items:
                 break
             items.extend(self._parse(raw_items))
@@ -256,8 +326,7 @@ class VintedClient:
         The poller instead wants a single cheap read it can repeat every minute,
         so it controls pagination itself rather than inheriting `max_pages_per_query`.
         """
-        brand_ids_param = ",".join(str(b) for b in brand_ids)
-        return self._parse(self._get_page(brand_ids_param, catalog_id, page))
+        return self._parse(self._get_page(brand_ids, catalog_id, page))
 
     def reset_session(self) -> None:
         """Drop the current session so the next request bootstraps a fresh one.

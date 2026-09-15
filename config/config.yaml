@@ -3,6 +3,11 @@
 
 currency: GBP
 base_url: https://www.vinted.co.uk
+# Sent as the Locale and Accept-Language headers. The catalogue service
+# (api.vinted.co.uk) does not infer locale from the host the way the old
+# www endpoint did: without this it answers in a language of its own
+# choosing and prices in the wrong currency, and every listing is discarded.
+locale: en-GB
 
 scrape:
   per_page: 96

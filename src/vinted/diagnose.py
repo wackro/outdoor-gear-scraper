@@ -27,6 +27,31 @@ BODY_EXCERPT_CHARS = 300
 # Generous: this is the evidence that stops the next parse being guesswork.
 SAMPLE_JSON_CHARS = 2500
 
+# Keys whose contents are bulky and say nothing about the shape. The photo
+# object's `thumbnails` array alone ran to six entries of signed URLs and ate the
+# entire budget, so the dump ended mid-key at `"phot` -- before `price`, `title`
+# and `user`, which were the keys worth reading. Raising the cap only moves the
+# cliff; dropping the ballast is what keeps the informative keys in frame.
+BULKY_KEYS = ("thumbnails", "photos", "search_tracking_params")
+
+
+def _condense(value):
+    """Replace bulky values with a note saying what was there.
+
+    A marker rather than a deletion, so the reader can still tell the key exists
+    -- an omission that looks like an absence would be its own trap.
+    """
+    if isinstance(value, dict):
+        return {
+            key: f"<{len(inner)} entries, omitted>"
+            if key in BULKY_KEYS and isinstance(inner, (list, dict))
+            else _condense(inner)
+            for key, inner in value.items()
+        }
+    if isinstance(value, list):
+        return [_condense(v) for v in value]
+    return value
+
 
 @dataclass
 class Probe:
@@ -81,11 +106,38 @@ class Probe:
         return bool(self.ok and self.item_count and self.has_favourite_count)
 
 
-# The fields the scraper and the hot path actually consume. `favourite_count` is
-# first because it is not merely useful: it is the entire hotness signal, and an
-# endpoint that omits it cannot drive alerts at all.
-FIELDS_WE_NEED = ("favourite_count", "brand_title", "size_title", "status",
-                  "view_count", "photo")
+# The fields the scraper and the hot path actually consume, by the path they
+# actually live at. `favourite_count` is first because it is not merely useful:
+# it is the entire hotness signal, and an endpoint that omits it cannot drive
+# alerts at all.
+#
+# These used to name `brand_title`, `size_title` and `status`, which this service
+# does not have at all. Reporting three permanent 0% columns reads as a broken
+# endpoint rather than a renamed field, and that misreading is what sent the last
+# parse off on an assumption. Measure where the data is, not where it used to be.
+FIELDS_WE_NEED = ("favourite_count", "view_count", "price", "photo",
+                  "item_box.first_line", "item_box.second_line")
+
+
+def _dig(item: dict, path: str):
+    """Follow a dotted path, returning None if any step is missing."""
+    value = item
+    for key in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def _present(value) -> bool:
+    """Is this a value we could actually use?
+
+    An empty string counts as absent: `brand_title` arriving as "" is precisely
+    the case that silently dropped every listing, and a coverage number that
+    calls it present would have hidden it. `0` is a real favourite count and
+    must count as present.
+    """
+    return value is not None and value != "" and value != []
 
 
 def _coverage(items: list[dict]) -> dict[str, float]:
@@ -98,8 +150,8 @@ def _coverage(items: list[dict]) -> dict[str, float]:
     if not items:
         return {}
     return {
-        field_name: 100.0 * sum(1 for i in items if i.get(field_name) is not None) / len(items)
-        for field_name in FIELDS_WE_NEED
+        path: 100.0 * sum(1 for i in items if _present(_dig(i, path))) / len(items)
+        for path in FIELDS_WE_NEED
     }
 
 
@@ -157,7 +209,8 @@ def run_probe(client: VintedClient, name: str, asks: str, path: str,
         probe.has_favourite_count = probe.coverage.get("favourite_count", 0.0) > 0
         if items:
             probe.sample_keys = sorted(items[0])
-            probe.sample_json = json.dumps(items[0], indent=1)[:SAMPLE_JSON_CHARS]
+            probe.sample_json = json.dumps(
+                _condense(items[0]), indent=1)[:SAMPLE_JSON_CHARS]
     return probe
 
 
@@ -242,6 +295,11 @@ MAX_BUNDLE_BYTES = 2_000_000
 # Tried alongside whatever discovery turns up, so the report is useful even when
 # the page gives nothing away. Ordered by how plausible a successor each is.
 SERVICE_CATALOGUE_PATH = "/svc-catalogue/items"
+
+# The probe asks for UK English explicitly so that what it prints is what the
+# scraper will see. Left unset, the service picks its own and the sample listing
+# describes a different response from the one production gets.
+LOCALE = "en-GB"
 
 CANDIDATE_PATHS = (
     "/api/v2/items",
@@ -372,7 +430,7 @@ def hunt_for_replacement(client: VintedClient, *, catalog_id: int,
     not the answer.
     """
     discovered, notes = discover_api_paths(client)
-    auth, warm_notes = warmup(client)
+    _, warm_notes = warmup(client)
     notes = warm_notes + notes
 
     probes = []
@@ -381,26 +439,54 @@ def hunt_for_replacement(client: VintedClient, *, catalog_id: int,
     # 14 Sep fix moved to api.<domain>/svc-catalogue/items with the filters
     # restructured into attribute_ids[...], so this is not a guess -- it is
     # somebody else's working code, asked to prove itself against our brands.
+    #
+    # No X-Anon-Id / X-Csrf-Token: an earlier run probed the service with and
+    # without them and both returned 20 items, so they are not required. warmup()
+    # still runs, because whether they are *offered* is worth reporting.
     service_url = catalogue_host(client.base_url) + SERVICE_CATALOGUE_PATH
     service_params = {
         "page": 1, "per_page": 20, "order": "newest_first",
         "currency": client.config.currency,
         "attribute_ids[catalog]": catalog_id,
     }
-    if brand_ids:
-        service_params["attribute_ids[brand]"] = str(brand_ids[0])
+    locale_headers = {"Locale": LOCALE, "Accept-Language": f"{LOCALE},en;q=0.9"}
+
+    # First, because it is the shape the scraper actually sends and so the one
+    # whose sample listing is worth printing.
     probes.append(run_probe(
-        client, "svc-catalogue/items",
-        "the endpoint Vintrack moved to on 14 Sep",
-        service_url, service_params, headers=auth,
+        client, "all brands, repeated keys",
+        "the shape the scraper now sends -- one key per brand id",
+        service_url, {**service_params, "attribute_ids[brand]": list(brand_ids)},
+        headers=locale_headers,
     ))
 
-    # The same service without the auth headers, so we learn whether they are
-    # actually required or merely what somebody else happened to send.
+    # The control that turns the diagnosis into a demonstration. This is what the
+    # scraper sent for two cycles: 56 ids in one comma-joined value. It returns
+    # HTTP 200 with an empty list -- no error, no retry, indistinguishable in the
+    # log from a market where nothing is for sale.
     probes.append(run_probe(
-        client, "svc-catalogue/items (no auth headers)",
-        "are X-Anon-Id and X-Csrf-Token really needed?",
-        service_url, service_params,
+        client, "all brands, comma-joined",
+        "the shape that silently returned nothing",
+        service_url,
+        {**service_params, "attribute_ids[brand]": ",".join(str(b) for b in brand_ids)},
+        headers=locale_headers,
+    ))
+
+    if brand_ids:
+        probes.append(run_probe(
+            client, "one brand",
+            "does a single id work regardless of encoding?",
+            service_url, {**service_params, "attribute_ids[brand]": str(brand_ids[0])},
+            headers=locale_headers,
+        ))
+
+    # Without the Locale header the service answers in a locale of its own
+    # choosing -- observed as French condition strings and dollar prices. Compare
+    # `item_box.second_line` and `price` between this and the first probe.
+    probes.append(run_probe(
+        client, "all brands, no Locale header",
+        "what does the locale header actually change?",
+        service_url, {**service_params, "attribute_ids[brand]": list(brand_ids)},
     ))
 
     # Everything else, still asked the old way, as the control.
@@ -412,7 +498,7 @@ def hunt_for_replacement(client: VintedClient, *, catalog_id: int,
         params["brand_ids"] = str(brand_ids[0])
     for path in dict.fromkeys([*discovered, *CANDIDATE_PATHS]):
         source = "found on the page" if path in discovered else "educated guess"
-        probes.append(run_probe(client, path, source, path, params, headers=auth))
+        probes.append(run_probe(client, path, source, path, params))
     return probes, notes
 
 

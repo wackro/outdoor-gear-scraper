@@ -140,3 +140,38 @@ class TestCatalogueServiceShape:
     def test_the_hotness_signal_is_read_as_before(self):
         """100% coverage on the live service — the one field that had to survive."""
         assert self.parse().favourite_count == 4
+
+
+class TestConditionVocabulary:
+    """A condition we cannot read is indistinguishable from no condition.
+
+    `passes_condition` rejects a blank condition, so an unrecognised vocabulary
+    silently drops every listing. That is not hypothetical: without a `Locale`
+    header the catalogue service answered "M · Très bon état", which ranks 0 and
+    would have starved the feed with nothing in the log to say why.
+    """
+
+    def _raw(self, second_line):
+        return {"id": 1, "price": {"amount": "50.0", "currency_code": "GBP"},
+                "item_box": {"first_line": "Rab", "second_line": second_line}}
+
+    def test_a_known_condition_is_read(self):
+        item = VintedItem.from_json(self._raw("M · Very good"),
+                                    base_url="https://x")
+        assert item.size == "M"
+        assert item.condition == "Very good"
+
+    def test_an_unknown_vocabulary_is_announced(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            VintedItem.from_json(self._raw("M · Très bon état"), base_url="https://x")
+        assert "No recognised condition" in caplog.text
+        assert "Très bon état" in caplog.text
+
+    def test_a_listing_with_no_second_line_is_not_flagged(self, caplog):
+        """Plenty of listings genuinely have neither, and warning on those would
+        bury the signal in noise."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            VintedItem.from_json(self._raw(""), base_url="https://x")
+        assert "No recognised condition" not in caplog.text
