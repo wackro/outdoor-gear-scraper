@@ -434,3 +434,37 @@ class TestClientRepointed:
     def test_the_catalogue_goes_to_the_api_host(self):
         from src.vinted.client import catalogue_host
         assert catalogue_host("https://www.vinted.co.uk") == "https://api.vinted.co.uk"
+
+
+class TestSampleListing:
+    """Show the listing, do not grade it.
+
+    The coverage table answers "are the fields I expected present?". It cannot
+    answer "what is actually here?", and that gap is exactly how a parse built
+    from someone else's diff shipped and discarded every listing: brand_title
+    measured 0%, the fallback assumed item_box, and nothing ever checked whether
+    item_box existed.
+    """
+
+    def _probe(self, body):
+        client = FakeClient(FakeSession([("/api", FakeResponse(200, body=body))]))
+        return run_probe(client, "n", "a", "/api/v2/x")
+
+    def test_it_captures_every_key_the_listing_has(self):
+        probe = self._probe('{"items":[{"id":1,"zzz":2,"aaa":3}]}')
+        assert probe.sample_keys == ["aaa", "id", "zzz"]
+
+    def test_it_captures_the_listing_verbatim(self):
+        probe = self._probe('{"items":[{"id":1,"surprise":{"nested":true}}]}')
+        assert '"surprise"' in probe.sample_json
+        assert '"nested"' in probe.sample_json
+
+    def test_it_surfaces_keys_nobody_thought_to_measure(self):
+        """The whole point: a field we never asked about still shows up."""
+        probe = self._probe('{"items":[{"id":1,"brand_dto":{"title":"Rab"}}]}')
+        assert "brand_dto" in probe.sample_keys
+
+    def test_no_items_means_no_sample(self):
+        probe = self._probe('{"items":[]}')
+        assert probe.sample_keys == []
+        assert probe.sample_json == ""
