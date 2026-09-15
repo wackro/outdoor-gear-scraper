@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..filters import condition_rank
+
 
 @dataclass(frozen=True)
 class VintedItem:
@@ -46,14 +48,16 @@ class VintedItem:
 
         url = raw.get("url") or f"{base_url}/items/{item_id}"
 
+        size, condition = _extract_size_and_condition(raw)
+
         return cls(
             id=item_id,
             title=str(raw.get("title") or "").strip(),
             price=price,
             currency=currency,
-            brand_title=str(raw.get("brand_title") or "").strip(),
-            size=str(raw.get("size_title") or "").strip(),
-            condition=str(raw.get("status") or "").strip(),
+            brand_title=_extract_brand(raw),
+            size=size,
+            condition=condition,
             url=url,
             image_url=_extract_photo(raw.get("photo")),
             favourite_count=_extract_count(raw.get("favourite_count")),
@@ -61,6 +65,53 @@ class VintedItem:
             promoted=bool(raw.get("promoted")),
             listed_ts=_extract_listed_ts(raw.get("photo")),
         )
+
+
+def _extract_brand(raw: dict) -> str:
+    """Brand, from wherever this version of the response keeps it.
+
+    The catalogue service returns `brand_title` empty and puts the brand in
+    `item_box.first_line` instead -- measured at 0% and 100% coverage
+    respectively. This is not cosmetic: `scrape()` maps the brand back to a
+    config entry and silently skips anything it cannot match, so reading the
+    wrong field drops every listing and looks like a quiet market.
+    """
+    direct = str(raw.get("brand_title") or "").strip()
+    if direct:
+        return direct
+    box = raw.get("item_box")
+    if isinstance(box, dict):
+        return str(box.get("first_line") or "").strip()
+    return ""
+
+
+def _extract_size_and_condition(raw: dict) -> tuple[str, str]:
+    """Size and condition, which now arrive joined in one display string.
+
+    `size_title` and `status` used to carry them and are both absent from the
+    catalogue service. What it sends instead is `item_box.second_line`, a
+    human-facing string like "M · Very good".
+
+    The parts are classified by *content*, not position: anything matching a
+    known Vinted condition is the condition, anything else is the size. Relying
+    on order would break the first time a listing has only one of the two, which
+    is common -- plenty of listings have a condition and no size.
+    """
+    size = str(raw.get("size_title") or "").strip()
+    condition = str(raw.get("status") or "").strip()
+    if size and condition:
+        return size, condition
+
+    box = raw.get("item_box")
+    second = str(box.get("second_line") or "").strip() if isinstance(box, dict) else ""
+    for part in (p.strip() for p in second.split("·")):
+        if not part:
+            continue
+        if condition_rank(part):
+            condition = condition or part
+        else:
+            size = size or part
+    return size, condition
 
 
 def _extract_price(price_field) -> float | None:

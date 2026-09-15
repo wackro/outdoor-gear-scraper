@@ -28,8 +28,17 @@ from .models import VintedItem
 
 log = logging.getLogger(__name__)
 
-CATALOG_PATH = "/api/v2/catalog/items"
+# The catalogue moved to its own host and path on 14 September 2026. Brands did
+# not: it still answers from www. That split is what made the outage confusing --
+# one endpoint 404'd at every parameter shape while another kept working on the
+# same session, which reads like a retirement and was a relocation.
+CATALOG_PATH = "/svc-catalogue/items"
 BRANDS_PATH = "/api/v2/brands"
+
+
+def catalogue_host(base_url: str) -> str:
+    """www.vinted.co.uk -> api.vinted.co.uk, where the catalogue now lives."""
+    return base_url.replace("://www.", "://api.", 1)
 
 # Top-level departments in the homepage catalog tree, used to tag each category
 # node with the gender/section it belongs to.
@@ -93,9 +102,11 @@ class VintedClient:
 
     # -- fetching ------------------------------------------------------------
 
-    def _request(self, params: dict, path: str = CATALOG_PATH, result_key: str = "items") -> list[dict]:
+    def _request(self, params: dict, path: str = CATALOG_PATH, result_key: str = "items",
+                 host: str | None = None) -> list[dict]:
         """Call a Vinted API endpoint with retries/backoff; return the result list."""
         headers = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+        base = host or self.base_url
 
         last_error: Exception | None = None
         blocked = False
@@ -103,7 +114,7 @@ class VintedClient:
             try:
                 session = self._ensure_session()  # may (re-)bootstrap
                 resp = session.get(
-                    self.base_url + path,
+                    base + path,
                     params=params,
                     headers=headers,
                     timeout=30,
@@ -139,15 +150,21 @@ class VintedClient:
         raise error_type(f"Request failed (params={params}): {last_error}")
 
     def _get_page(self, brand_ids: str, catalog_id: int, page: int) -> list[dict]:
+        """One page of the catalogue.
+
+        Filters moved into an `attribute_ids[...]` shape when the service split
+        out; `catalog_ids` and `brand_ids` are no longer recognised.
+        """
         return self._request(
             {
                 "page": page,
                 "per_page": self.config.scrape.per_page,
                 "order": self.config.scrape.order,
-                "catalog_ids": catalog_id,
-                "brand_ids": brand_ids,  # one or many, comma-separated
+                "attribute_ids[catalog]": catalog_id,
+                "attribute_ids[brand]": brand_ids,  # one or many, comma-separated
                 "currency": self.config.currency,
-            }
+            },
+            host=catalogue_host(self.base_url),
         )
 
     def resolve_brand(self, search_text: str) -> tuple[int, str] | None:
