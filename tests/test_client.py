@@ -57,34 +57,36 @@ def query_of(call) -> str:
 
 
 class TestBrandEncoding:
-    """The bug, pinned."""
+    """Measured against the live service, not inferred from another client.
 
-    def test_each_brand_id_gets_its_own_key(self, client):
+    Probed side by side with all 56 of our brand ids: the comma-joined value
+    returns 20 listings, one repeated key per id returns HTTP 400. Repeated keys
+    are what Vintrack sends, and taking that on trust cost a run -- so what is
+    pinned here is what the service was observed to accept.
+    """
+
+    def test_the_ids_are_comma_joined_into_one_value(self, client):
         session = RecordingSession()
         client._session = session
         client._get_page([319730, 90804, 2319], catalog_id=2052, page=1)
 
-        url = query_of(session.calls[0])
-        assert url.count("attribute_ids%5Bbrand%5D=") == 3
-        for brand_id in (319730, 90804, 2319):
-            assert f"attribute_ids%5Bbrand%5D={brand_id}" in url
+        assert session.calls[0]["params"]["attribute_ids[brand]"] == "319730,90804,2319"
+        assert query_of(session.calls[0]).count("attribute_ids%5Bbrand%5D=") == 1
 
-    def test_the_ids_are_never_comma_joined(self, client):
-        """The shape that returned an empty list with a 200."""
+    def test_one_repeated_key_per_id_is_never_sent(self, client):
+        """This shape is HTTP 400 at our number of brands."""
         session = RecordingSession()
         client._session = session
         client._get_page([1, 2, 3], catalog_id=2052, page=1)
 
-        assert "1%2C2%2C3" not in query_of(session.calls[0])
-        assert session.calls[0]["params"]["attribute_ids[brand]"] == [1, 2, 3]
+        assert not isinstance(session.calls[0]["params"]["attribute_ids[brand]"], list)
+        assert query_of(session.calls[0]).count("attribute_ids%5Bbrand%5D=") == 1
 
-    def test_a_single_brand_is_still_a_list(self, client):
-        """One id worked by accident under the old encoding, which is why the
-        probe kept reporting success while the scraper got nothing."""
+    def test_a_single_brand_needs_no_separator(self, client):
         session = RecordingSession()
         client._session = session
         client._get_page([2319], catalog_id=2052, page=1)
-        assert session.calls[0]["params"]["attribute_ids[brand]"] == [2319]
+        assert session.calls[0]["params"]["attribute_ids[brand]"] == "2319"
 
     def test_the_old_filter_names_are_gone(self, client):
         session = RecordingSession()
@@ -105,7 +107,7 @@ class TestBrandEncoding:
         client.fetch_items([1, 2], catalog_id=2052)
         assert len(session.calls) >= 2
         for call in session.calls:
-            assert call["params"]["attribute_ids[brand]"] == [1, 2]
+            assert call["params"]["attribute_ids[brand]"] == "1,2"
 
 
 class TestHeaders:

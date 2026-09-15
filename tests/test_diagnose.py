@@ -35,7 +35,7 @@ class FakeSession:
         self.calls = []
 
     def get(self, url, params=None, headers=None, timeout=None):
-        self.calls.append((url, params or {}))
+        self.calls.append((url, params or {}, headers or {}))
         for fragment, response in self.rules:
             if fragment in url:
                 if isinstance(response, Exception):
@@ -280,7 +280,7 @@ class TestHuntVerdict:
             ("/api/v2/", FakeResponse(404, body='{"code":104}')),
         ])
         verdict = summarise_hunt(probes)
-        assert "Found a replacement" in verdict
+        assert "works" in verdict
         assert "/api/v2/items" in verdict
 
     def test_listings_without_the_counter_get_their_own_verdict(self):
@@ -419,7 +419,7 @@ class TestServiceCandidate:
         printed, so it must be the shape production actually sends."""
         client = FakeClient(FakeSession([]))
         probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
-        assert probes[0].name == "all brands, repeated keys"
+        assert probes[0].name == "all brands, comma-joined"
         assert "api.vinted.co.uk/svc-catalogue/items" in probes[0].url
 
     def test_it_sends_the_restructured_filters(self):
@@ -429,13 +429,12 @@ class TestServiceCandidate:
         assert catalogue, "it never called the service"
         params = catalogue[0][1]
         assert params["attribute_ids[catalog]"] == 2052
-        assert params["attribute_ids[brand]"] == [99], "must stay a list"
+        assert params["attribute_ids[brand]"] == "99"
         assert "catalog_ids" not in params, "the old filter shape is gone"
 
     def test_it_contrasts_both_brand_encodings(self):
-        """The comma-joined shape is the control: it is what the scraper sent
-        while it stored nothing, and the two rows side by side turn the
-        diagnosis into a demonstration."""
+        """Repeated keys are HTTP 400 at our number of brands. The row stays as
+        a regression check: if it ever answers, the two are interchangeable."""
         client = FakeClient(FakeSession([]))
         probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1, 2])
         by_name = {p.name: p for p in probes}
@@ -444,14 +443,24 @@ class TestServiceCandidate:
 
         session = FakeSession([])
         hunt_for_replacement(FakeClient(session), catalog_id=2052, brand_ids=[1, 2])
-        joined = [c for c in session.calls
-                  if c[1].get("attribute_ids[brand]") == "1,2"]
-        assert joined, "the failing shape was never reproduced"
+        assert any(c[1].get("attribute_ids[brand]") == [1, 2] for c in session.calls)
+        assert any(c[1].get("attribute_ids[brand]") == "1,2" for c in session.calls)
 
-    def test_it_isolates_what_the_locale_header_changes(self):
-        client = FakeClient(FakeSession([]))
-        probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
-        assert any("no Locale header" in p.name for p in probes)
+    def test_the_locale_probe_varies_only_the_locale(self):
+        """Its first version changed the encoding too, so its 400 said nothing
+        about locale -- a two-variable experiment answering neither question."""
+        session = FakeSession([])
+        hunt_for_replacement(FakeClient(session), catalog_id=2052, brand_ids=[1, 2])
+        joined = [c for c in session.calls
+                  if "svc-catalogue" in c[0]
+                  and c[1].get("attribute_ids[brand]") == "1,2"]
+        assert len(joined) == 2, "expected the same request with and without Locale"
+
+        stated, unstated = ((joined[0], joined[1]) if "Locale" in joined[0][2]
+                            else (joined[1], joined[0]))
+        assert "Locale" in stated[2]
+        assert "Locale" not in unstated[2]
+        assert stated[1] == unstated[1], "only the headers may differ"
 
 
 class TestClientRepointed:

@@ -451,42 +451,44 @@ def hunt_for_replacement(client: VintedClient, *, catalog_id: int,
     }
     locale_headers = {"Locale": LOCALE, "Accept-Language": f"{LOCALE},en;q=0.9"}
 
-    # First, because it is the shape the scraper actually sends and so the one
-    # whose sample listing is worth printing.
+    joined = ",".join(str(b) for b in brand_ids)
+
+    # First, because it is the shape the scraper sends and so the one whose
+    # sample listing is worth printing.
     probes.append(run_probe(
-        client, "all brands, repeated keys",
-        "the shape the scraper now sends -- one key per brand id",
-        service_url, {**service_params, "attribute_ids[brand]": list(brand_ids)},
+        client, "all brands, comma-joined",
+        "the shape the scraper sends -- every id in one value",
+        service_url, {**service_params, "attribute_ids[brand]": joined},
         headers=locale_headers,
     ))
 
-    # The control that turns the diagnosis into a demonstration. This is what the
-    # scraper sent for two cycles: 56 ids in one comma-joined value. It returns
-    # HTTP 200 with an empty list -- no error, no retry, indistinguishable in the
-    # log from a market where nothing is for sale.
+    # Kept as a standing regression check, not out of doubt. One repeated key
+    # per id is what Vintrack sends, and reading their fix as gospel is how this
+    # client briefly shipped that shape and got HTTP 400 on every category. If
+    # this row ever starts answering, the two are interchangeable after all.
     probes.append(run_probe(
-        client, "all brands, comma-joined",
-        "the shape that silently returned nothing",
-        service_url,
-        {**service_params, "attribute_ids[brand]": ",".join(str(b) for b in brand_ids)},
+        client, "all brands, repeated keys",
+        "does one key per id work at our number of brands?",
+        service_url, {**service_params, "attribute_ids[brand]": list(brand_ids)},
         headers=locale_headers,
     ))
 
     if brand_ids:
         probes.append(run_probe(
             client, "one brand",
-            "does a single id work regardless of encoding?",
+            "is it the encoding, or the number of ids?",
             service_url, {**service_params, "attribute_ids[brand]": str(brand_ids[0])},
             headers=locale_headers,
         ))
 
-    # Without the Locale header the service answers in a locale of its own
-    # choosing -- observed as French condition strings and dollar prices. Compare
-    # `item_box.second_line` and `price` between this and the first probe.
+    # Identical to the first probe but for the headers, so the difference is
+    # attributable. The first attempt at this varied the encoding too, which
+    # made its 400 say nothing about locale at all -- a two-variable experiment
+    # answering neither question.
     probes.append(run_probe(
         client, "all brands, no Locale header",
-        "what does the locale header actually change?",
-        service_url, {**service_params, "attribute_ids[brand]": list(brand_ids)},
+        "what does the Locale header actually change?",
+        service_url, {**service_params, "attribute_ids[brand]": joined},
     ))
 
     # Everything else, still asked the old way, as the control.
@@ -506,9 +508,9 @@ def summarise_hunt(probes: list[Probe]) -> str:
     """The line that decides what happens next."""
     usable = [p for p in probes if p.usable]
     if usable:
-        return (f"**Found a replacement: `{usable[0].name}`.** It returns listings "
-                f"carrying `favourite_count`, which is everything the scraper and "
-                f"the hot path need. Repoint `CATALOG_PATH` at it.")
+        return (f"**`{usable[0].name}` works.** It returns listings carrying "
+                f"`favourite_count`, which is everything the scraper and the hot "
+                f"path need. If that is not the shape `_get_page` sends, make it so.")
 
     answering = [p for p in probes if p.ok and p.item_count]
     if answering:
