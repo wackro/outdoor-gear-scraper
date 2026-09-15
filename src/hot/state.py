@@ -127,6 +127,7 @@ class HotState:
                 price     = excluded.price,
                 size      = excluded.size,
                 condition = excluded.condition,
+                url       = excluded.url,      -- see the note in storage/db.py
                 image_url = excluded.image_url,
                 promoted  = excluded.promoted,
                 last_seen = excluded.last_seen,

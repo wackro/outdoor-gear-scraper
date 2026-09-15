@@ -10,6 +10,25 @@ name: vinted-hot-poller
 on:
   schedule:
     - cron: "23 */2 * * *"
+  # A merged fix must reach the *live* poller, not just the next one. This job
+  # runs for 5h45m on whatever it checked out at start, so without this a fix to
+  # the client was invisible here until the run expired -- and then until a
+  # scheduled run actually fired, which on this repo is another four to seven
+  # hours. That is how the site sat on a frozen feed for five hours after the
+  # scraper itself was working again.
+  #
+  # `cancel-in-progress` below turns this into a handover rather than a pile-up,
+  # and the cache post-step runs on cancellation, so velocity history survives.
+  push:
+    branches: [main]
+    paths:
+      - 'src/hot/**'
+      - 'src/vinted/**'
+      - 'src/filters.py'
+      - 'src/config.py'
+      - 'config/**'
+      - '.github/workflows/poller.yml'
+      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       dry_run:

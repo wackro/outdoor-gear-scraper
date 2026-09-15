@@ -175,3 +175,46 @@ class TestConditionVocabulary:
         with caplog.at_level(logging.WARNING):
             VintedItem.from_json(self._raw(""), base_url="https://x")
         assert "No recognised condition" not in caplog.text
+
+
+class TestListingUrl:
+    """A card whose link does nothing is worse than a missing card.
+
+    The catalogue service returns a bare path where the old endpoint returned a
+    full URL. `hot.js` whitelists hrefs to http(s) before assigning one -- an XSS
+    guard, and correct -- so a relative path means the anchor never gets an href
+    at all. The listings render, look fine, and are unclickable.
+    """
+
+    def _raw(self, url):
+        raw = {"id": 10012275111, "price": {"amount": "50.0", "currency_code": "GBP"},
+               "item_box": {"first_line": "Rab", "second_line": "M · Very good"}}
+        if url is not None:
+            raw["url"] = url
+        return raw
+
+    def _url(self, url):
+        return VintedItem.from_json(
+            self._raw(url), base_url="https://www.vinted.co.uk").url
+
+    def test_a_bare_path_is_made_absolute(self):
+        assert self._url("/items/10012275111-arcteryx-jacket") == \
+            "https://www.vinted.co.uk/items/10012275111-arcteryx-jacket"
+
+    def test_an_absolute_url_is_left_alone(self):
+        assert self._url("https://www.vinted.co.uk/items/1-a") == \
+            "https://www.vinted.co.uk/items/1-a"
+
+    def test_a_path_without_a_leading_slash_still_works(self):
+        assert self._url("items/1-a") == "https://www.vinted.co.uk/items/1-a"
+
+    def test_a_missing_url_falls_back_to_the_id(self):
+        assert self._url(None) == "https://www.vinted.co.uk/items/10012275111"
+        assert self._url("") == "https://www.vinted.co.uk/items/10012275111"
+
+    def test_the_result_always_passes_an_http_whitelist(self):
+        """The page's own test, applied here, because here is where it can be
+        fixed without weakening the guard."""
+        for candidate in (None, "", "/items/1-a", "items/1-a",
+                          "https://www.vinted.co.uk/items/1-a"):
+            assert self._url(candidate).startswith("https://")

@@ -49,7 +49,7 @@ class VintedItem:
 
         currency = _extract_currency(raw.get("price")) or ""
 
-        url = raw.get("url") or f"{base_url}/items/{item_id}"
+        url = _extract_url(raw.get("url"), base_url=base_url, item_id=item_id)
 
         size, condition = _extract_size_and_condition(raw)
 
@@ -124,6 +124,27 @@ def _extract_size_and_condition(raw: dict) -> tuple[str, str]:
             "language? Every listing will be filtered out until it is.", second,
         )
     return size, condition
+
+
+def _extract_url(raw_url, *, base_url: str, item_id: int) -> str:
+    """The listing's address, always absolute.
+
+    The catalogue service returns a *path* -- "/items/10012275111-arcteryx" --
+    where the old endpoint returned a full URL. Nothing downstream tolerates
+    that. The page whitelists hrefs to http(s) before assigning them, correctly,
+    so a relative path silently produces a card with no link at all: not a broken
+    link, an inert one. Alerts would carry the same unusable address.
+
+    Resolving it here rather than in the page fixes the feed, the database, the
+    fallback and the push notification from one place -- and leaves the
+    whitelist, which is an XSS guard, alone.
+    """
+    path = str(raw_url or "").strip()
+    if not path:
+        return f"{base_url}/items/{item_id}"
+    if path.startswith(("http://", "https://")):
+        return path
+    return f"{base_url}/{path.lstrip('/')}"
 
 
 def _extract_price(price_field) -> float | None:
