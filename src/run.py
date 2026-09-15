@@ -69,7 +69,18 @@ def scrape(
             db.add_observation(item, brand=brand_name, catalog_id=catalog_id)
             stored += 1
         total += stored
-        log.info("%s: %d items", category.label, stored)
+        # Both numbers, always. "0 items" cannot distinguish a fetch that came
+        # back empty from a response we failed to parse, and those have nothing
+        # in common except the symptom -- which cost a full merge cycle to tell
+        # apart the first time the response shape drifted.
+        log.info("%s: fetched %d, stored %d", category.label, len(items), stored)
+        if items and not stored:
+            log.warning(
+                "%s: every one of %d listings was discarded because its brand "
+                "did not match the watchlist. Brand titles seen: %s",
+                category.label, len(items),
+                sorted({i.brand_title for i in items[:20]}),
+            )
         client.throttle()  # polite pause between queries
     return total
 

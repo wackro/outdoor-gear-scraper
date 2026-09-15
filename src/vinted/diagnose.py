@@ -12,6 +12,7 @@ never raising and never retrying.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -22,6 +23,9 @@ from .client import VintedClient
 TELLTALE_HEADERS = ("x-datadome", "x-datadome-cid", "content-type", "server")
 
 BODY_EXCERPT_CHARS = 300
+
+# Generous: this is the evidence that stops the next parse being guesswork.
+SAMPLE_JSON_CHARS = 2500
 
 
 @dataclass
@@ -39,6 +43,11 @@ class Probe:
     # field present on one listing but absent on most is a trap: it looks fine
     # in a sample and starves the signal in production.
     coverage: dict[str, float] = field(default_factory=dict)
+    # One real listing, verbatim. Grading a response against the fields we
+    # expected tells us nothing about the fields it actually has -- which is how
+    # a parse built on assumption got shipped and silently discarded every item.
+    sample_keys: list[str] = field(default_factory=list)
+    sample_json: str = ""
     error: str = ""
 
     @property
@@ -146,6 +155,9 @@ def run_probe(client: VintedClient, name: str, asks: str, path: str,
         probe.item_count = len(payload["items"])
         probe.coverage = _coverage(items)
         probe.has_favourite_count = probe.coverage.get("favourite_count", 0.0) > 0
+        if items:
+            probe.sample_keys = sorted(items[0])
+            probe.sample_json = json.dumps(items[0], indent=1)[:SAMPLE_JSON_CHARS]
     return probe
 
 

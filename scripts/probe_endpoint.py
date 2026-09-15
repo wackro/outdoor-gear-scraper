@@ -59,6 +59,18 @@ def render(probes: list[Probe], headline: str, *,
             for probe in covered:
                 cells = " | ".join(f"{probe.coverage[f]:.0f}%" for f in fields)
                 lines.append(f"| `{probe.name}` | {cells} |")
+
+        # The percentages say which of the fields we expected are there. Only the
+        # listing itself says what is *actually* there, which is the question
+        # that matters when the shape has drifted.
+        sampled = next((p for p in hunt if p.sample_json), None)
+        if sampled:
+            lines += ["", f"### A real listing from `{sampled.name}`", "",
+                      "Every top-level key it has:", "",
+                      "`" + "`, `".join(sampled.sample_keys) + "`", "",
+                      "<details><summary>The listing, verbatim</summary>", "",
+                      "```json", sampled.sample_json, "```", "",
+                      "</details>", ""]
         if notes:
             lines += ["", "<details><summary>How the paths were found</summary>", ""]
             lines += [f"- {note}" for note in notes]
