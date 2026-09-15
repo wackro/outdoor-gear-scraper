@@ -10,7 +10,10 @@ a diagnostic that only works against the live site is not testable at all.
 """
 import pytest
 
-from src.vinted.diagnose import Probe, diagnose, interpret, run_probe
+from src.vinted.diagnose import (
+    Probe, diagnose, discover_api_paths, hunt_for_replacement, interpret,
+    run_probe, summarise_hunt,
+)
 
 
 class FakeResponse:
@@ -74,7 +77,7 @@ class TestRunProbe:
         client = FakeClient(FakeSession([("/api", FakeResponse(200, body='{"items":[{},{}]}'))]))
         probe = run_probe(client, "n", "a", "/api/v2/catalog/items")
         assert probe.item_count == 2
-        assert probe.verdict == "OK, 2 items"
+        assert probe.verdict.startswith("OK, 2 items")
 
     def test_a_request_that_never_lands_is_a_result_not_a_crash(self):
         """The probe must survive anything; an exception here is a finding."""
@@ -172,3 +175,134 @@ class TestCoverage:
         """The table is read by someone who did not write it."""
         for probe in probes_from([]):
             assert probe.asks, f"{probe.name} has no stated hypothesis"
+
+
+class TestAcceptanceBar:
+    """A 200 is not success. `favourite_count` is.
+
+    It is the entire hotness signal, so an endpoint that serves listings without
+    it would restore the website and leave the alerts permanently dead — a dead
+    end wearing the costume of a solution.
+    """
+
+    def _probe(self, body):
+        client = FakeClient(FakeSession([("/api", FakeResponse(200, body=body))]))
+        return run_probe(client, "n", "a", "/api/v2/items")
+
+    def test_items_with_the_counter_are_usable(self):
+        probe = self._probe('{"items":[{"id":1,"favourite_count":4}]}')
+        assert probe.usable is True
+        assert "with favourite_count" in probe.verdict
+
+    def test_items_without_the_counter_are_not(self):
+        probe = self._probe('{"items":[{"id":1,"title":"Jacket"}]}')
+        assert probe.ok is True, "it did answer"
+        assert probe.usable is False, "but it is no use to us"
+        assert "**no** favourite_count" in probe.verdict
+
+    def test_a_null_counter_counts_as_absent(self):
+        """Vinted omits it on some listings; null is not a value."""
+        assert self._probe('{"items":[{"id":1,"favourite_count":null}]}').usable is False
+
+    def test_an_empty_items_array_is_not_a_find(self):
+        probe = self._probe('{"items":[]}')
+        assert probe.usable is False
+        assert "zero items" in probe.verdict
+
+    def test_a_200_carrying_no_items_at_all_is_not_a_find(self):
+        assert self._probe('{"brands":[{"id":1}]}').usable is False
+
+
+class TestDiscovery:
+    def test_it_reads_paths_out_of_escaped_server_rendered_json(self):
+        """The page embeds JSON with escaped slashes, exactly as the category
+        tree does — which is why `fetch_catalog_tree` unescapes before matching."""
+        page = r'<html><script>{"endpoint":"\/api\/v2\/catalog\/items","u":"\/api\/v2\/users"}</script></html>'
+        client = FakeClient(FakeSession([("/catalog", FakeResponse(200, body=page))]))
+        paths, notes = discover_api_paths(client)
+        assert "/api/v2/catalog/items" in paths
+        assert "/api/v2/users" in paths
+        assert any("named in the page" in n for n in notes)
+
+    def test_listing_paths_are_ranked_first(self):
+        """Whoever reads this on a phone should see the plausible ones first."""
+        page = '<html>"/api/v2/users" "/api/v2/zzz" "/api/v2/catalog/items"</html>'
+        client = FakeClient(FakeSession([("/catalog", FakeResponse(200, body=page))]))
+        paths, _ = discover_api_paths(client)
+        assert paths[0] == "/api/v2/catalog/items"
+
+    def test_it_reads_the_bundles_where_the_fetch_calls_live(self):
+        page = '<html><script src="/assets/app.js"></script></html>'
+        client = FakeClient(FakeSession([
+            ("/catalog", FakeResponse(200, body=page)),
+            ("app.js", FakeResponse(200, body='fetch("/api/v2/item_feed")')),
+        ]))
+        paths, notes = discover_api_paths(client)
+        assert "/api/v2/item_feed" in paths
+        assert any("app.js" in n for n in notes)
+
+    def test_it_does_not_download_the_whole_application(self):
+        """Bundles run to megabytes and there are dozens of them."""
+        from src.vinted.diagnose import MAX_BUNDLES
+        page = "<html>" + "".join(
+            f'<script src="/a{i}.js"></script>' for i in range(20)) + "</html>"
+        session = FakeSession([("/catalog", FakeResponse(200, body=page))])
+        discover_api_paths(FakeClient(session))
+        bundle_reads = [c for c in session.calls if ".js" in c[0]]
+        assert len(bundle_reads) <= MAX_BUNDLES
+
+    def test_an_unreachable_page_is_reported_not_raised(self):
+        client = FakeClient(FakeSession([("/catalog", ConnectionError("refused"))]))
+        paths, notes = discover_api_paths(client)
+        assert paths == []
+        assert any("could not fetch" in n for n in notes)
+
+    def test_a_failing_bundle_does_not_abort_the_hunt(self):
+        page = ('<html>"/api/v2/from_page"<script src="/bad.js"></script></html>')
+        client = FakeClient(FakeSession([
+            ("/catalog", FakeResponse(200, body=page)),
+            ("bad.js", ConnectionError("gone")),
+        ]))
+        paths, notes = discover_api_paths(client)
+        assert "/api/v2/from_page" in paths, "the page's own paths still count"
+        assert any("failed" in n for n in notes)
+
+
+class TestHuntVerdict:
+    def _hunt(self, rules):
+        client = FakeClient(FakeSession(rules))
+        return hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])[0]
+
+    def test_a_working_replacement_is_named(self):
+        probes = self._hunt([
+            ("/catalog", FakeResponse(200, body="<html></html>")),
+            ("/api/v2/items", FakeResponse(200, body='{"items":[{"favourite_count":3}]}')),
+            ("/api/v2/", FakeResponse(404, body='{"code":104}')),
+        ])
+        verdict = summarise_hunt(probes)
+        assert "Found a replacement" in verdict
+        assert "/api/v2/items" in verdict
+
+    def test_listings_without_the_counter_get_their_own_verdict(self):
+        """Not a success and not a failure — a decision to be made."""
+        probes = self._hunt([
+            ("/catalog", FakeResponse(200, body="<html></html>")),
+            ("/api/v2/items", FakeResponse(200, body='{"items":[{"id":1}]}')),
+            ("/api/v2/", FakeResponse(404, body='{"code":104}')),
+        ])
+        verdict = summarise_hunt(probes)
+        assert "not enough" in verdict
+        assert "alerts permanently dead" in verdict
+
+    def test_nothing_found_says_so_honestly(self):
+        probes = self._hunt([
+            ("/catalog", FakeResponse(200, body="<html></html>")),
+            ("/api/", FakeResponse(404, body='{"code":104,"message":"Content not found"}')),
+        ])
+        verdict = summarise_hunt(probes)
+        assert "No replacement found" in verdict
+        assert "catalog HTML" in verdict, "it should name the remaining route"
+
+    def test_the_dead_endpoint_is_probed_as_a_control(self):
+        probes = self._hunt([("/catalog", FakeResponse(200, body="<html></html>"))])
+        assert "/api/v2/catalog/items" in [p.name for p in probes]
