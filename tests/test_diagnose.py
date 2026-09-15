@@ -417,3 +417,20 @@ class TestServiceCandidate:
         client = FakeClient(FakeSession([]))
         probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
         assert any("no auth headers" in p.name for p in probes)
+
+
+class TestClientRepointed:
+    """The scraper itself, now aimed at the catalogue service."""
+
+    def test_the_catalogue_path_is_the_service_one(self):
+        from src.vinted.client import CATALOG_PATH
+        assert CATALOG_PATH == "/svc-catalogue/items"
+
+    def test_brands_did_not_move(self):
+        """Half the confusion was that these two live in different places now."""
+        from src.vinted.client import BRANDS_PATH
+        assert BRANDS_PATH == "/api/v2/brands"
+
+    def test_the_catalogue_goes_to_the_api_host(self):
+        from src.vinted.client import catalogue_host
+        assert catalogue_host("https://www.vinted.co.uk") == "https://api.vinted.co.uk"

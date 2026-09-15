@@ -67,3 +67,76 @@ class TestExistingBehaviourStillHolds:
     def test_unusable_rows_are_skipped(self):
         assert VintedItem.from_json({"title": "no id"}, base_url=BASE) is None
         assert VintedItem.from_json({"id": 1, "price": "0"}, base_url=BASE) is None
+
+
+class TestCatalogueServiceShape:
+    """The catalogue service sends brand, size and condition somewhere new.
+
+    Measured against the live service on 15 Sep: `favourite_count`, `view_count`
+    and `photo` at 100%, and `brand_title`, `size_title`, `status` at **0%** —
+    all three moved into a human-facing `item_box`. Reading the old fields would
+    not error, it would drop every listing: `scrape()` maps the brand back to a
+    config entry and skips anything it cannot match.
+    """
+
+    def raw(self, **overrides):
+        base = {
+            "id": 1,
+            "price": {"amount": "38.0", "currency_code": "GBP"},
+            "title": "Beta AR jacket",
+            "favourite_count": 4,
+            "item_box": {"first_line": "Rab", "second_line": "M · Very good"},
+        }
+        base.update(overrides)
+        return base
+
+    def parse(self, **overrides):
+        return VintedItem.from_json(self.raw(**overrides),
+                                    base_url="https://www.vinted.co.uk")
+
+    def test_brand_comes_from_the_item_box(self):
+        assert self.parse().brand_title == "Rab"
+
+    def test_size_and_condition_are_split_out_of_one_line(self):
+        item = self.parse()
+        assert item.size == "M"
+        assert item.condition == "Very good"
+
+    def test_the_parts_are_classified_by_content_not_position(self):
+        """Order is not dependable, and position-based parsing would put the
+        condition in the size field the moment they swap."""
+        item = self.parse(item_box={"first_line": "Rab", "second_line": "Very good · M"})
+        assert item.size == "M"
+        assert item.condition == "Very good"
+
+    def test_a_listing_with_only_a_condition(self):
+        """Common: plenty of listings carry no size at all."""
+        item = self.parse(item_box={"first_line": "Rab", "second_line": "Good"})
+        assert item.condition == "Good"
+        assert item.size == ""
+
+    def test_a_listing_with_only_a_size(self):
+        item = self.parse(item_box={"first_line": "Rab", "second_line": "XL"})
+        assert item.size == "XL"
+        assert item.condition == ""
+
+    def test_multi_word_sizes_survive(self):
+        item = self.parse(item_box={"first_line": "Rab", "second_line": "UK 9.5 · Good"})
+        assert item.size == "UK 9.5"
+        assert item.condition == "Good"
+
+    def test_the_old_fields_still_win_when_present(self):
+        """Older responses, and whatever Vinted does next, keep working."""
+        item = self.parse(brand_title="Patagonia", size_title="L", status="New with tags")
+        assert item.brand_title == "Patagonia"
+        assert item.size == "L"
+        assert item.condition == "New with tags"
+
+    def test_a_missing_item_box_is_not_a_crash(self):
+        item = self.parse(item_box=None)
+        assert item is not None
+        assert item.brand_title == ""
+
+    def test_the_hotness_signal_is_read_as_before(self):
+        """100% coverage on the live service — the one field that had to survive."""
+        assert self.parse().favourite_count == 4
