@@ -23,7 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import load_config                                    # noqa: E402
 from src.vinted.brand_resolver import resolve_brands                  # noqa: E402
-from src.vinted.client import BRANDS_PATH, CATALOG_PATH, VintedClient  # noqa: E402
+from src.vinted.client import (                                       # noqa: E402
+    BRANDS_PATH, LEGACY_CATALOG_PATH, VintedClient,
+)
 from src.vinted.diagnose import (                                     # noqa: E402
     Probe, diagnose, hunt_for_replacement, interpret, summarise_hunt,
 )
@@ -111,11 +113,18 @@ def main(argv: list[str] | None = None) -> int:
         brand_ids = [2319]      # The North Face, stable and long-lived
 
     catalog_id = config.categories[0].id if config.categories else 2052
+    # The *legacy* path, deliberately. This block is the control: it establishes
+    # that the old endpoint is really gone and that the session, IP and a
+    # known-good /api/v2 route are all fine. Passing CATALOG_PATH here -- which a
+    # previous change did, once it was repointed -- asks the new path on the old
+    # host, which 404s for a reason that has nothing to do with the diagnosis and
+    # made `interpret()` announce "the catalog endpoint is gone" off the back of
+    # it.
     probes = diagnose(
         client,
         catalog_id=catalog_id,
         brand_ids=brand_ids,
-        catalog_path=CATALOG_PATH,
+        catalog_path=LEGACY_CATALOG_PATH,
         brands_path=BRANDS_PATH,
     )
 

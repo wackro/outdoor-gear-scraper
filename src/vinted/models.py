@@ -1,9 +1,12 @@
 """Data models for Vinted catalog items, with defensive JSON parsing."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from ..filters import condition_rank
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -104,13 +107,22 @@ def _extract_size_and_condition(raw: dict) -> tuple[str, str]:
 
     box = raw.get("item_box")
     second = str(box.get("second_line") or "").strip() if isinstance(box, dict) else ""
-    for part in (p.strip() for p in second.split("·")):
-        if not part:
-            continue
+    parts = [p.strip() for p in second.split("·") if p.strip()]
+    for part in parts:
         if condition_rank(part):
             condition = condition or part
         else:
             size = size or part
+
+    # Classifying by content means an unrecognised vocabulary is indistinguishable
+    # from no condition at all -- and a blank condition fails `passes_condition`,
+    # so every listing is dropped downstream with nothing to say why. That is
+    # exactly how a locale slip would present: silently, as an empty market.
+    if parts and not condition:
+        log.warning(
+            "No recognised condition in %r -- is the response in the expected "
+            "language? Every listing will be filtered out until it is.", second,
+        )
     return size, condition
 
 
