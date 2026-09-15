@@ -181,16 +181,19 @@ class VintedClient:
         Filters moved into an `attribute_ids[...]` shape when the service split
         out; `catalog_ids` and `brand_ids` are no longer recognised.
 
-        `brand_ids` stays a *list*. That is the whole fix, and it is not a
-        stylistic choice: the service wants one repeated key per id
-        (`attribute_ids[brand]=1&attribute_ids[brand]=2`), which is what
-        `urlencode(doseq=True)` produces from a list. Comma-joining them, as the
-        old `brand_ids` parameter accepted, sends a single unparseable id --
-        matching nothing, returning `{"items": []}` with a 200, and looking
-        exactly like a market where nobody is selling anything.
+        Brand ids are comma-joined into one value. This was measured, not
+        assumed: probed side by side with all 56 of our ids, the comma-joined
+        value returns 20 listings and one repeated key per id
+        (`attribute_ids[brand]=1&attribute_ids[brand]=2`) returns **HTTP 400**.
+
+        Repeated keys are what Vintrack sends and what this code briefly sent on
+        the strength of that, which cost a run. Their client works, so the
+        service presumably accepts both at the handful of ids a person filters
+        by in a browser; at 56 it does not. Whatever the boundary is, the shape
+        that answers is the one we send.
         """
         if not brand_ids:
-            # An empty list drops the key entirely, which asks for the whole
+            # Otherwise the filter is an empty value, which asks for the whole
             # unfiltered catalogue -- a slow, conspicuous request whose every
             # result the brand match then discards. `run.py` already refuses
             # this; the poller has no such check and would repeat it every cycle.
@@ -202,7 +205,7 @@ class VintedClient:
                 "per_page": self.config.scrape.per_page,
                 "order": self.config.scrape.order,
                 "attribute_ids[catalog]": catalog_id,
-                "attribute_ids[brand]": list(brand_ids),
+                "attribute_ids[brand]": ",".join(str(b) for b in brand_ids),
                 # Inert on this service -- locale decides the currency -- but
                 # harmless, and it still documents what we expect to get back.
                 "currency": self.config.currency,
