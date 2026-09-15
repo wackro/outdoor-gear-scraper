@@ -306,3 +306,114 @@ class TestHuntVerdict:
     def test_the_dead_endpoint_is_probed_as_a_control(self):
         probes = self._hunt([("/catalog", FakeResponse(200, body="<html></html>"))])
         assert "/api/v2/catalog/items" in [p.name for p in probes]
+
+
+class TestCatalogueHost:
+    """The catalogue moved to its own host; the rest of the API did not.
+
+    That split is the whole explanation for the outage: /api/v2/brands kept
+    answering from www while every catalogue request 404'd, which looked like
+    one endpoint being retired and was actually a relocation.
+    """
+
+    def test_www_becomes_api(self):
+        from src.vinted.diagnose import catalogue_host
+        assert catalogue_host("https://www.vinted.co.uk") == "https://api.vinted.co.uk"
+
+    def test_a_host_without_www_is_left_alone(self):
+        from src.vinted.diagnose import catalogue_host
+        assert catalogue_host("https://api.vinted.co.uk") == "https://api.vinted.co.uk"
+
+    def test_only_the_host_is_rewritten(self):
+        """A path segment that happens to contain 'www.' must survive."""
+        from src.vinted.diagnose import catalogue_host
+        assert catalogue_host("https://www.vinted.co.uk/x/www.y") \
+            == "https://api.vinted.co.uk/x/www.y"
+
+
+class TestWarmup:
+    def test_it_reads_both_credentials_from_the_homepage(self):
+        """Neither costs an extra request: the client already fetches this page
+        for its cookies."""
+        from src.vinted.diagnose import warmup
+        page = 'window.CSRF_TOKEN = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";'
+        client = FakeClient(FakeSession([
+            ("vinted.co.uk/", FakeResponse(200, body=page, headers={"X-Anon-Id": "abc-123"})),
+        ]))
+        headers, notes = warmup(client)
+        assert headers == {"X-Anon-Id": "abc-123",
+                           "X-Csrf-Token": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"}
+
+    def test_a_missing_credential_is_reported_not_fatal(self):
+        """We still want to see what the service says without it."""
+        from src.vinted.diagnose import warmup
+        client = FakeClient(FakeSession([("vinted.co.uk/", FakeResponse(200, body="<html/>"))]))
+        headers, notes = warmup(client)
+        assert headers == {}
+        assert any("not offered" in n for n in notes)
+        assert any("not found" in n for n in notes)
+
+    def test_a_failed_warmup_is_a_note_not_a_crash(self):
+        from src.vinted.diagnose import warmup
+        client = FakeClient(FakeSession([("vinted.co.uk/", ConnectionError("down"))]))
+        headers, notes = warmup(client)
+        assert headers == {}
+        assert any("warmup request failed" in n for n in notes)
+
+
+class TestFieldCoverage:
+    """Presence on one listing is not enough to build on.
+
+    Vinted legitimately omits some of these per listing, so what matters is how
+    often we can rely on a field — a field on 5% of results looks like success
+    in a sample and starves the signal in production.
+    """
+
+    def _probe(self, body):
+        client = FakeClient(FakeSession([("/api", FakeResponse(200, body=body))]))
+        return run_probe(client, "n", "a", "/api/v2/x")
+
+    def test_it_reports_a_percentage_per_field(self):
+        probe = self._probe(
+            '{"items":[{"favourite_count":1,"brand_title":"Rab"},'
+            '          {"favourite_count":2},'
+            '          {"brand_title":"Rab"},'
+            '          {}]}')
+        assert probe.coverage["favourite_count"] == 50.0
+        assert probe.coverage["brand_title"] == 50.0
+        assert probe.coverage["status"] == 0.0
+
+    def test_partial_coverage_still_counts_as_present(self):
+        """One listing in twenty is enough to prove the field exists at all —
+        the percentage is what says whether it is dependable."""
+        items = ",".join(["{}"] * 19 + ['{"favourite_count":3}'])
+        probe = self._probe(f'{{"items":[{items}]}}')
+        assert probe.has_favourite_count is True
+        assert probe.coverage["favourite_count"] == 5.0
+
+    def test_no_items_means_no_coverage_claims(self):
+        assert self._probe('{"items":[]}').coverage == {}
+
+
+class TestServiceCandidate:
+    def test_the_relocated_endpoint_is_probed_first(self):
+        """It is not a guess — it is somebody else's working code."""
+        client = FakeClient(FakeSession([]))
+        probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
+        assert probes[0].name == "svc-catalogue/items"
+        assert "api.vinted.co.uk/svc-catalogue/items" in probes[0].url
+
+    def test_it_sends_the_restructured_filters(self):
+        session = FakeSession([])
+        hunt_for_replacement(FakeClient(session), catalog_id=2052, brand_ids=[99])
+        catalogue = [c for c in session.calls if "svc-catalogue" in c[0]]
+        assert catalogue, "it never called the service"
+        params = catalogue[0][1]
+        assert params["attribute_ids[catalog]"] == 2052
+        assert params["attribute_ids[brand]"] == "99"
+        assert "catalog_ids" not in params, "the old filter shape is gone"
+
+    def test_it_also_asks_whether_the_auth_headers_are_required(self):
+        client = FakeClient(FakeSession([]))
+        probes, _ = hunt_for_replacement(client, catalog_id=2052, brand_ids=[1])
+        assert any("no auth headers" in p.name for p in probes)
