@@ -1,6 +1,7 @@
 """SQLite persistence: schema init, upserts, observations, baselines, deals."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -8,11 +9,18 @@ from pathlib import Path
 
 from ..vinted.models import VintedItem
 
+log = logging.getLogger(__name__)
+
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 INDEX_PATH = Path(__file__).resolve().parent / "indexes.sql"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "vinted.db"
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# Frozen, like HISTORICAL_CATALOG_IDS below: a migration has no access to config
+# and must mean the same thing on every future run, whatever config then says.
+# This repo has only ever scraped the UK site.
+SITE_BASE_URL = "https://www.vinted.co.uk"
 
 # Every category name this database has ever stored, and the Vinted catalog id it
 # means. Frozen as a literal on purpose.
@@ -124,6 +132,36 @@ class Database:
         if self._version() < 2:
             self._drop_category_names()
             self._set_version(2)
+
+        if self._version() < 3:
+            self._absolutise_urls()
+            self._set_version(3)
+
+    def _absolutise_urls(self) -> None:
+        """Repair listing URLs stored as bare paths.
+
+        The catalogue service returns "/items/123-a-jacket" where the old
+        endpoint returned a full URL, and the parse passed it through for one
+        run. The page whitelists hrefs to http(s), so those rows render a card
+        whose link does nothing at all.
+
+        `upsert_item` now refreshes `url`, so anything still listed repairs
+        itself on its next sighting. This is for the rest: rows that went
+        inactive during the broken window and would otherwise keep a dead link
+        until they are pruned.
+        """
+        # A database old enough to predate the `url` column reaches here on its
+        # way up from version 0, and `UPDATE` on a missing column is a hard
+        # error rather than a no-op.
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(items)")}
+        if "url" not in columns:
+            return
+
+        cur = self.conn.execute(
+            "UPDATE items SET url = ? || url WHERE url LIKE '/%'", (SITE_BASE_URL,)
+        )
+        if cur.rowcount:
+            log.info("Made %d listing URLs absolute.", cur.rowcount)
 
     def _version(self) -> int:
         return self.conn.execute("PRAGMA user_version").fetchone()[0]
@@ -278,6 +316,10 @@ class Database:
                 price           = excluded.price,
                 size            = excluded.size,
                 condition       = excluded.condition,
+                -- Refreshed, not frozen at first sight: when a parse bug puts a
+                -- bad address in these, every re-sighting repairs the row
+                -- instead of leaving it wrong until it is pruned.
+                url             = excluded.url,
                 image_url       = excluded.image_url,
                 last_seen       = excluded.last_seen,
                 active          = 1,
