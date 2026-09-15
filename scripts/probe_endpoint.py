@@ -45,6 +45,20 @@ def render(probes: list[Probe], headline: str, *,
         for probe in hunt:
             mark = "**USABLE**" if probe.usable else ("OK" if probe.ok else "FAIL")
             lines.append(f"| `{probe.name}` | {mark} — {probe.verdict} | {probe.asks} |")
+
+        # Coverage decides whether a working endpoint is actually a fix. A field
+        # present on a couple of listings and absent on the rest reads as success
+        # in a sample and starves the signal in production.
+        covered = [p for p in hunt if p.coverage]
+        if covered:
+            lines += ["", "### Field coverage of what answered", "",
+                      "% of returned listings carrying each field the scraper reads.", ""]
+            fields = list(covered[0].coverage)
+            lines.append("| endpoint | " + " | ".join(f"`{f}`" for f in fields) + " |")
+            lines.append("| --- |" + " --- |" * len(fields))
+            for probe in covered:
+                cells = " | ".join(f"{probe.coverage[f]:.0f}%" for f in fields)
+                lines.append(f"| `{probe.name}` | {cells} |")
         if notes:
             lines += ["", "<details><summary>How the paths were found</summary>", ""]
             lines += [f"- {note}" for note in notes]
