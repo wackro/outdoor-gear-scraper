@@ -24,17 +24,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import load_config                                    # noqa: E402
 from src.vinted.brand_resolver import resolve_brands                  # noqa: E402
 from src.vinted.client import BRANDS_PATH, CATALOG_PATH, VintedClient  # noqa: E402
-from src.vinted.diagnose import Probe, diagnose, interpret            # noqa: E402
+from src.vinted.diagnose import (                                     # noqa: E402
+    Probe, diagnose, hunt_for_replacement, interpret, summarise_hunt,
+)
 
 log = logging.getLogger("probe")
 
 
-def render(probes: list[Probe], headline: str) -> str:
+def render(probes: list[Probe], headline: str, *,
+           hunt: list[Probe] | None = None, hunt_headline: str = "",
+           notes: list[str] | None = None) -> str:
     """Markdown, because the job summary renders it and a phone has to read it."""
-    lines = [
-        "# Vinted endpoint probe", "", headline, "",
-        "| request | result | asks |", "| --- | --- | --- |",
-    ]
+    lines = ["# Vinted endpoint probe", ""]
+
+    # The hunt goes first when there is one: if a replacement was found, that is
+    # the only thing worth reading, and the diagnosis below is just evidence.
+    if hunt:
+        lines += [hunt_headline, "", "## Candidate endpoints", "",
+                  "| path | result | where it came from |", "| --- | --- | --- |"]
+        for probe in hunt:
+            mark = "**USABLE**" if probe.usable else ("OK" if probe.ok else "FAIL")
+            lines.append(f"| `{probe.name}` | {mark} — {probe.verdict} | {probe.asks} |")
+        if notes:
+            lines += ["", "<details><summary>How the paths were found</summary>", ""]
+            lines += [f"- {note}" for note in notes]
+            lines += ["", "</details>", ""]
+        lines += ["", "## Diagnosis", ""]
+
+    lines += [headline, "",
+              "| request | result | asks |", "| --- | --- | --- |"]
     for probe in probes:
         mark = "OK" if probe.ok else "**FAIL**"
         lines.append(f"| `{probe.name}` | {mark} — {probe.verdict} | {probe.asks} |")
@@ -75,7 +93,10 @@ def main(argv: list[str] | None = None) -> int:
         brands_path=BRANDS_PATH,
     )
 
-    report = render(probes, interpret(probes))
+    hunt, notes = hunt_for_replacement(client, catalog_id=catalog_id, brand_ids=brand_ids)
+
+    report = render(probes, interpret(probes),
+                    hunt=hunt, hunt_headline=summarise_hunt(hunt), notes=notes)
     print(report)
 
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

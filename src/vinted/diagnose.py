@@ -12,6 +12,7 @@ never raising and never retrying.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .client import VintedClient
@@ -33,6 +34,7 @@ class Probe:
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
     item_count: int | None = None   # parsed from JSON when the shape is familiar
+    has_favourite_count: bool = False
     error: str = ""
 
     @property
@@ -44,10 +46,26 @@ class Probe:
         if self.error:
             return f"did not complete: {self.error}"
         if self.ok:
-            if self.item_count is not None:
-                return f"OK, {self.item_count} items"
+            if self.item_count:
+                counter = "with" if self.has_favourite_count else "**no**"
+                plural = "" if self.item_count == 1 else "s"
+                return (f"OK, {self.item_count} item{plural}, "
+                        f"{counter} favourite_count")
+            if self.item_count == 0:
+                return "OK, but zero items"
             return "OK"
         return f"HTTP {self.status}"
+
+    @property
+    def usable(self) -> bool:
+        """Could the scraper actually run on this?
+
+        Not the same as a 200. A replacement endpoint that returns listings
+        without `favourite_count` is no use at all: that counter is the entire
+        hotness signal, so such a find would be a dead end wearing the costume
+        of a solution.
+        """
+        return bool(self.ok and self.item_count and self.has_favourite_count)
 
 
 def _looks_like_a_bot_wall(probe: Probe) -> bool:
@@ -93,6 +111,10 @@ def run_probe(client: VintedClient, name: str, asks: str, path: str,
         return probe
     if isinstance(payload, dict) and isinstance(payload.get("items"), list):
         probe.item_count = len(payload["items"])
+        probe.has_favourite_count = any(
+            isinstance(item, dict) and item.get("favourite_count") is not None
+            for item in payload["items"]
+        )
     return probe
 
 
@@ -154,3 +176,131 @@ def interpret(probes: list[Probe]) -> str:
                 f"the difference is the fix.")
 
     return "**Mixed result.** Read the table; the pattern is not one of the usual ones."
+
+
+# --- finding the endpoint that replaced the one that vanished ----------------
+
+# Any /api/... path, as it appears in server-rendered JSON or a JS bundle.
+API_PATH = re.compile(r"/api/v\d+/[A-Za-z0-9_/-]{2,60}")
+
+# <script src="..."> — the fetch calls live in the bundle, not the markup.
+SCRIPT_SRC = re.compile(r'<script[^>]+src="([^"]+\.js[^"]*)"')
+
+# Bundles run to megabytes and there are dozens. Read a bounded slice of a few
+# of the most promising, rather than pulling the whole application down.
+MAX_BUNDLES = 3
+MAX_BUNDLE_BYTES = 2_000_000
+
+# Tried alongside whatever discovery turns up, so the report is useful even when
+# the page gives nothing away. Ordered by how plausible a successor each is.
+CANDIDATE_PATHS = (
+    "/api/v2/items",
+    "/api/v2/catalog/items",        # the dead one, as the control
+    "/api/v3/catalog/items",
+    "/api/v2/catalog/search",
+    "/api/v2/search/items",
+)
+
+# Paths that could plausibly serve listings, ranked ahead of the rest.
+INTERESTING = ("catalog", "item", "search", "feed")
+
+
+def _rank(path: str) -> tuple[int, str]:
+    """Listing-ish paths first; otherwise alphabetical, so output is stable."""
+    return (0 if any(word in path for word in INTERESTING) else 1, path)
+
+
+def _unescape(text: str) -> str:
+    """Server-rendered JSON arrives escaped inside the HTML.
+
+    Same treatment `fetch_catalog_tree` applies to recover the category tree.
+    """
+    return text.replace('\\"', '"').replace("\\/", "/").replace("\\u0026", "&")
+
+
+def discover_api_paths(client: VintedClient, *, page_path: str = "/catalog") -> tuple[list[str], list[str]]:
+    """Read the API paths the site itself uses. Returns (paths, notes).
+
+    A catalog page rather than the homepage: it is the page whose data we want,
+    so whatever serves it is named in its payload or in the bundle it loads.
+
+    Never raises -- discovery failing is a reportable outcome, not a crash.
+    """
+    notes: list[str] = []
+    found: set[str] = set()
+
+    try:
+        session = client._ensure_session()
+        response = session.get(client.base_url + page_path, timeout=30)
+        html = response.text or ""
+        notes.append(f"{page_path} returned HTTP {response.status_code}, {len(html):,} bytes")
+    except Exception as exc:  # noqa: BLE001
+        notes.append(f"could not fetch {page_path}: {type(exc).__name__}: {exc}")
+        return [], notes
+
+    text = _unescape(html)
+    in_page = set(API_PATH.findall(text))
+    found |= in_page
+    notes.append(f"{len(in_page)} API path(s) named in the page itself")
+
+    bundles = SCRIPT_SRC.findall(html)
+    notes.append(f"{len(bundles)} script bundle(s) referenced; reading up to {MAX_BUNDLES}")
+    for src in bundles[:MAX_BUNDLES]:
+        url = src if src.startswith("http") else client.base_url + src
+        try:
+            body = session.get(url, timeout=30).text or ""
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"bundle {src[:60]} failed: {type(exc).__name__}")
+            continue
+        clipped = body[:MAX_BUNDLE_BYTES]
+        hits = set(API_PATH.findall(clipped))
+        found |= hits
+        notes.append(f"bundle {src.rsplit('/', 1)[-1][:40]}: {len(hits)} path(s) "
+                     f"in the first {len(clipped):,} bytes")
+
+    return sorted(found, key=_rank), notes
+
+
+def hunt_for_replacement(client: VintedClient, *, catalog_id: int,
+                         brand_ids: list[int]) -> tuple[list[Probe], list[str]]:
+    """Probe every candidate successor, discovered or guessed.
+
+    Each is asked the question the scraper needs answered -- newest items for one
+    category -- so a candidate that answers but cannot do that job is visibly
+    not the answer.
+    """
+    discovered, notes = discover_api_paths(client)
+    candidates = list(dict.fromkeys([*discovered, *CANDIDATE_PATHS]))
+
+    params = {
+        "page": 1, "per_page": 5, "order": "newest_first",
+        "currency": client.config.currency, "catalog_ids": catalog_id,
+    }
+    if brand_ids:
+        params["brand_ids"] = str(brand_ids[0])
+
+    probes = []
+    for path in candidates:
+        source = "found on the page" if path in discovered else "educated guess"
+        probes.append(run_probe(client, path, source, path, params))
+    return probes, notes
+
+
+def summarise_hunt(probes: list[Probe]) -> str:
+    """The line that decides what happens next."""
+    usable = [p for p in probes if p.usable]
+    if usable:
+        return (f"**Found a replacement: `{usable[0].name}`.** It returns listings "
+                f"carrying `favourite_count`, which is everything the scraper and "
+                f"the hot path need. Repoint `CATALOG_PATH` at it.")
+
+    answering = [p for p in probes if p.ok and p.item_count]
+    if answering:
+        return (f"**Something answers, but it is not enough.** `{answering[0].name}` "
+                f"returns listings with no `favourite_count` — the entire hotness "
+                f"signal. Repointing at it would restore the site and leave alerts "
+                f"permanently dead, so this needs a decision, not a patch.")
+
+    return ("**No replacement found.** Nothing discovered on the page or guessed at "
+            "serves listings. The JSON API looks closed to us; parsing the "
+            "server-rendered catalog HTML is the remaining route.")
